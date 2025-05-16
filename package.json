@@ -1,0 +1,32 @@
+{
+  "name": "@laborin/picojsx",
+  "version": "1.0.0",
+  "description": "PicoJSX: A lightweight frontend library inspired by Nano JSX for creating user interfaces using JSX or h function calls.",
+  "main": "picojsx.js",
+  "module": "picojsx.js",
+  "type": "module",
+  "files": [
+    "picojsx.js",
+    "readme.md"
+  ],
+  "scripts": {},
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/laborin/picojsx.git"
+  },
+  "keywords": [
+    "jsx",
+    "frontend",
+    "ui",
+    "javascript",
+    "nanojsx-inspired",
+    "picojsx",
+    "nanojsx"
+  ],
+  "author": "Emmanuel Laborin <laborin@gmail.com>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/laborin/picojsx/issues"
+  },
+  "homepage": "https://github.com/laborin/picojsx#readme"
+}
