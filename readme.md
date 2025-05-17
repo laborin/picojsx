@@ -3,7 +3,7 @@
 
 PicoJSX is a lightweight frontend library inspired by Nano JSX, designed for creating user interfaces using JSX or direct calls to the `h` (hyperscript) function. It offers a component model with state, lifecycle methods, an optional global store with `localStorage` persistence, and automatic/manual UI update management.
 
-**Version:** 1.0.0
+**Version:** 1.0.1
 
 ## Key Features
 
@@ -374,7 +374,7 @@ class MyManualComponent extends Component {
 
 ### Focus Management
 
-PicoJSX tries its best to restore focus to an element (like an input) after its parent component re-renders. For this to work reliably, **the element that needs to keep focus must have a unique `id` attribute.** It also tries to restore the text selection range in inputs.
+PicoJSX tries its best to restore focus to an element (like an input) after the component that contains it re-renders. For this to work reliably, **the element that needs to keep focus must have a unique `id` attribute.** It also tries to restore the text selection range in inputs.
 
 ```javascript
 class InputForm extends Component {
@@ -871,3 +871,6 @@ A quick summary of when they fire:
 *   Used by `render` when clearing the container and by `update` when replacing old content.
 
 Hopefully, this gives a clearer picture of PicoJSX's internals! Happy coding!
+
+---
+Made with ❤️ in Sonora 🌵
