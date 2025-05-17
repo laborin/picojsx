@@ -1,4 +1,5 @@
 # PicoJSX: Guide and Documentation
+[![Node.js CI for PicoJSX](https://github.com/laborin/picojsx/actions/workflows/node-ci.yml/badge.svg)](https://github.com/laborin/picojsx/actions/workflows/node-ci.yml)
 
 PicoJSX is a lightweight frontend library inspired by Nano JSX, designed for creating user interfaces using JSX or direct calls to the `h` (hyperscript) function. It offers a component model with state, lifecycle methods, an optional global store with `localStorage` persistence, and automatic/manual UI update management.
 
