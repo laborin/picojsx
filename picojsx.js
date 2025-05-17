@@ -36,12 +36,24 @@ const PicoJSX = (() => {
 					instance.componentWillUnmount();
 				}
 				instance._isUnmounted = true; // Mark as unmounted
-				instance._isMounted = false;  // Mark as not mounted
+				instance._isMounted = false; // Mark as not mounted
 			}
 		}
 
 		if (node.childNodes) {
-			Array.from(node.childNodes).forEach(child => disposeNode(child, updatingInstance));
+			Array.from(node.childNodes).forEach((child) =>
+				disposeNode(child, updatingInstance)
+			);
+		}
+
+		// Limpiar ref si existe en el nodo y no es una instancia de componente (esas se manejan arriba)
+		if (!instance && node._PicoRef) {
+			if (typeof node._PicoRef === 'function') {
+				node._PicoRef(null);
+			} else if (node._PicoRef.current) {
+				node._PicoRef.current = null;
+			}
+			delete node._PicoRef; // Eliminar la referencia para evitar memory leaks
 		}
 	}
 
@@ -59,8 +71,8 @@ const PicoJSX = (() => {
 		const currentProps = { ...props };
 		if (currentProps.className !== undefined) {
 			// Handle className -> class
-			currentProps.class = currentProps.className; 
-			delete currentProps.className; 
+			currentProps.class = currentProps.className;
+			delete currentProps.className;
 		}
 
 		const previousProps = { ...oldProps };
@@ -71,15 +83,32 @@ const PicoJSX = (() => {
 		}
 
 		// Remove attributes/event listeners from previousProps that are not in currentProps
-		for (let name in previousProps) { 
+		for (let name in previousProps) {
 			// Ignore special props and only remove if not present in current props
-			if (name !== 'children' && name !== 'key' && name !== '_PicoInstance' && !(name in currentProps)) { 
-				if (name.startsWith('on') && typeof previousProps[name] === 'function') {
-					element.removeEventListener(name.substring(2).toLowerCase(), previousProps[name]);
+			if (
+				name !== 'children' &&
+				name !== 'key' &&
+				name !== '_PicoInstance' &&
+				!(name in currentProps)
+			) {
+				if (
+					name.startsWith('on') &&
+					typeof previousProps[name] === 'function'
+				) {
+					element.removeEventListener(
+						name.substring(2).toLowerCase(),
+						previousProps[name]
+					);
 				} else if (name === 'ref') {
 					// Clean up old ref
-					if (typeof previousProps[name] === 'function') previousProps[name](null);
-					else if (previousProps[name]?.current) previousProps[name].current = null;
+					if (typeof previousProps[name] === 'function')
+						previousProps[name](null);
+					else if (previousProps[name]?.current)
+						previousProps[name].current = null;
+					// También limpiar _PicoRef si este ref se está eliminando explícitamente por props
+					if (element._PicoRef === previousProps[name]) {
+						delete element._PicoRef;
+					}
 				} else {
 					element.removeAttribute(name); // Handles standard attributes like 'id', 'value', etc. and also 'class' if needed.
 				}
@@ -89,7 +118,12 @@ const PicoJSX = (() => {
 		// Set/update attributes/event listeners from currentProps
 		for (let name in currentProps) {
 			// Skip special props ('className' was already handled)
-			if (name === 'children' || name === 'key' || name === '_PicoInstance') continue;
+			if (
+				name === 'children' ||
+				name === 'key' ||
+				name === '_PicoInstance'
+			)
+				continue;
 
 			const value = currentProps[name];
 			const oldValue = previousProps[name]; // Compare with the transformed previousProps value
@@ -100,25 +134,36 @@ const PicoJSX = (() => {
 			if (name.startsWith('on') && typeof value === 'function') {
 				// Event listener
 				const eventName = name.substring(2).toLowerCase();
-				if (typeof oldValue === 'function') element.removeEventListener(eventName, oldValue);
+				if (typeof oldValue === 'function')
+					element.removeEventListener(eventName, oldValue);
 				element.addEventListener(eventName, value);
 			} else if (name === 'dangerouslySetInnerHTML') {
 				// Handle raw HTML insertion
-				if (value?.__html !== undefined && value.__html !== oldValue?.__html) element.innerHTML = value.__html;
-				else if (!value && oldValue?.__html !== undefined) element.innerHTML = '';
+				if (
+					value?.__html !== undefined &&
+					value.__html !== oldValue?.__html
+				)
+					element.innerHTML = value.__html;
+				else if (!value && oldValue?.__html !== undefined)
+					element.innerHTML = '';
 			} else if (name === 'style') {
 				// Style prop can be string or object
 				if (typeof value === 'string') {
-					if (element.style.cssText !== value) element.style.cssText = value;
+					if (element.style.cssText !== value)
+						element.style.cssText = value;
 				} else if (typeof value === 'object') {
-					if (typeof oldValue !== 'object') element.style.cssText = ''; // Clear if changing from string/undefined
+					if (typeof oldValue !== 'object')
+						element.style.cssText = ''; // Clear if changing from string/undefined
 					for (const styleName in oldValue) {
-						if (!(styleName in value)) element.style[styleName] = '';
+						if (!(styleName in value))
+							element.style[styleName] = '';
 					}
 					for (const styleName in value) {
-						if (element.style[styleName] !== value[styleName]) element.style[styleName] = value[styleName];
+						if (element.style[styleName] !== value[styleName])
+							element.style[styleName] = value[styleName];
 					}
-				} else if (oldValue) { // Clear style if new value is null/undefined
+				} else if (oldValue) {
+					// Clear style if new value is null/undefined
 					element.style.cssText = '';
 				}
 			} else if (name === 'ref') {
@@ -127,10 +172,29 @@ const PicoJSX = (() => {
 					// Cleanup old ref before setting new one
 					if (typeof oldValue === 'function') oldValue(null);
 					else if (oldValue?.current) oldValue.current = null;
+					// Si el ref antiguo almacenado en el elemento es este, ya no es válido.
+					if (element._PicoRef === oldValue) delete element._PicoRef;
 				}
-				if (typeof value === 'function') value(element);
-				else if (value?.current !== undefined) value.current = element;
-			} else if (value === undefined || value === null || value === false) {
+				if (typeof value === 'function') {
+					value(element);
+					element._PicoRef = value;
+				} else if (value?.current !== undefined) {
+					value.current = element;
+					element._PicoRef = value;
+				} else if (name === 'ref' && !value && element._PicoRef) {
+					// Si la nueva prop ref es explícitamente null/undefined, limpiar la guardada
+					if (typeof element._PicoRef === 'function') {
+						element._PicoRef(null);
+					} else if (element._PicoRef.current) {
+						element._PicoRef.current = null;
+					}
+					delete element._PicoRef;
+				}
+			} else if (
+				value === undefined ||
+				value === null ||
+				value === false
+			) {
 				// Remove attribute for falsey values (but not 0)
 				if (element.hasAttribute(name)) element.removeAttribute(name);
 			} else {
@@ -154,13 +218,21 @@ const PicoJSX = (() => {
 	 */
 	function _buildDomAndCollectMounts(input, mountQueue) {
 		// Handle simple cases: null, boolean, string, number
-		if (input == null || typeof input === 'boolean') return document.createTextNode('');
-		if (typeof input === 'string' || typeof input === 'number') return document.createTextNode(String(input));
+		if (input === null || input === undefined || typeof input === 'boolean')
+			return document.createTextNode('');
+		if (typeof input === 'string' || typeof input === 'number')
+			return document.createTextNode(String(input));
 
 		if (Array.isArray(input)) {
 			// If input is an array (e.g., children), process each item
 			const fragment = document.createDocumentFragment();
-			input.flat().forEach(child => fragment.appendChild(_buildDomAndCollectMounts(child, mountQueue)));
+			input
+				.flat()
+				.forEach((child) =>
+					fragment.appendChild(
+						_buildDomAndCollectMounts(child, mountQueue)
+					)
+				);
 			return fragment;
 		}
 
@@ -171,7 +243,10 @@ const PicoJSX = (() => {
 			// Call its render() method and recursively build the DOM for that output.
 			if (!instance._dom) {
 				const renderOutput = instance.render();
-				instance._dom = _buildDomAndCollectMounts(renderOutput, mountQueue);
+				instance._dom = _buildDomAndCollectMounts(
+					renderOutput,
+					mountQueue
+				);
 				// Tag the instance's root DOM node(s) with a reference to the instance
 				if (instance._dom instanceof Node) {
 					instance._dom._PicoInstance = instance;
@@ -179,7 +254,10 @@ const PicoJSX = (() => {
 			}
 			// Queue for mounting if needed
 			if (!instance._isMounted && !instance._isUnmounted) {
-				if (typeof instance.componentDidMount === 'function' && !mountQueue.includes(instance)) {
+				if (
+					typeof instance.componentDidMount === 'function' &&
+					!mountQueue.includes(instance)
+				) {
 					mountQueue.push(instance);
 				}
 			}
@@ -197,39 +275,49 @@ const PicoJSX = (() => {
 			if (type === Fragment) {
 				// Handle Fragment: process children into a DocumentFragment
 				const fragment = document.createDocumentFragment();
-				(children || []).flat().forEach(child => fragment.appendChild(_buildDomAndCollectMounts(child, mountQueue)));
+				(children || [])
+					.flat()
+					.forEach((child) =>
+						fragment.appendChild(
+							_buildDomAndCollectMounts(child, mountQueue)
+						)
+					);
 				return fragment;
 			}
 
-			if (typeof type === 'string') { // Standard HTML element
+			if (typeof type === 'string') {
+				// Standard HTML element
 				const element = document.createElement(type);
 				if (props) applyProps(element, props); // Apply props
 				// Build and append children
-				(children || []).flat().forEach(child => element.appendChild(_buildDomAndCollectMounts(child, mountQueue)));
-				if (props?.ref) {
-					// Refs are handled in applyProps, but this is a double-check/alternative?
-					// TODO: Review if ref handling here is redundant with applyProps
-					if (typeof props.ref === 'function') props.ref(element);
-					else if (props.ref?.current !== undefined) props.ref.current = element;
-				}
+				(children || [])
+					.flat()
+					.forEach((child) =>
+						element.appendChild(
+							_buildDomAndCollectMounts(child, mountQueue)
+						)
+					);
 				return element;
 			}
 		}
 
 		// Warn if we encounter an input type we don't know how to handle
+		// eslint-disable-next-line no-console
 		console.warn('PicoJSX: Cannot build DOM for unexpected type:', input);
-		return document.createTextNode(`[Err: Unknown input type ${typeof input}]`);
+		return document.createTextNode(
+			`[Err: Unknown input type ${typeof input}]`
+		);
 	}
 
 	/**
 	 * The hyperscript function (or JSX factory). This is what Babel/transpilers call.
 	 * It transforms `h('div', { id: 'foo' }, ...)` or `<div id="foo">...</div>` calls.
-	 * 
+	 *
 	 * - For HTML tags ('div', 'span', etc.): Returns a simple object `{ type, props, children }`.
 	 * - For PicoJSX Class Components: Returns `new ComponentClass(props)`.
 	 * - For Functional Components: Calls the function `FuncComp(props, children)` and returns its result.
 	 * - For Fragment: Returns `{ type: Fragment, props, children }`.
-	 * 
+	 *
 	 * Note: Does NOT create DOM nodes directly. That's `_buildDomAndCollectMounts`'s job.
 	 *
 	 * @param {string|Function|symbol} type - Element type ('div', Component class, functional component, Fragment symbol).
@@ -249,7 +337,7 @@ const PicoJSX = (() => {
 				// `_buildDomAndCollectMounts` will later call `instance.render()`.
 				return new type(props);
 			} else {
-				// Functional Component: execute it right away. 
+				// Functional Component: execute it right away.
 				// Its output (renderable stuff) will be processed by `_buildDomAndCollectMounts`.
 				return type(props, children); // Pass children as the second argument (array)
 			}
@@ -283,8 +371,8 @@ const PicoJSX = (() => {
 			this.state = this.state || {};
 			/** @protected @type {Node|null} Reference to the root DOM node or DocumentFragment rendered. */
 			this._dom = null;
-			/** 
-			 * @protected @type {boolean} Lifecycle state: True after componentDidMount runs (or is scheduled). 
+			/**
+			 * @protected @type {boolean} Lifecycle state: True after componentDidMount runs (or is scheduled).
 			 * Together with _isUnmounted, represents 3 states:
 			 * - (false, false): Initial, before mounting.
 			 * - (true, false): Mounted.
@@ -313,7 +401,7 @@ const PicoJSX = (() => {
 		 * @memberof Component
 		 */
 		setState(updater) {
-			this._prevState = { ...(this._prevState || this.state) }; // Store previous state for componentDidUpdate
+			this._prevState = { ...this.state }; // Always snapshot the current state before this update
 			if (typeof updater === 'function') {
 				Object.assign(this.state, updater(this.state, this.props));
 			} else {
@@ -331,10 +419,29 @@ const PicoJSX = (() => {
 		 */
 		update() {
 			// Don't update if not mounted, already unmounted, or has no DOM representation
-			if (!this._isMounted || this._isUnmounted || (!this._dom && !this._startMarker)) {
-				if (this._isUnmounted) console.warn("PicoJSX: update() called on an explicitly unmounted component.", this);
-				else if (!this._dom && !this._startMarker) console.warn("PicoJSX: update() called on component with no DOM or markers.", this);
-				else if (!this._isMounted) console.warn("PicoJSX: update() called on component not marked as mounted.", this);
+			if (
+				!this._isMounted ||
+				this._isUnmounted ||
+				(!this._dom && !this._startMarker)
+			) {
+				if (this._isUnmounted)
+					// eslint-disable-next-line no-console
+					console.warn(
+						'PicoJSX: update() called on an explicitly unmounted component.',
+						this
+					);
+				else if (!this._dom && !this._startMarker)
+					// eslint-disable-next-line no-console
+					console.warn(
+						'PicoJSX: update() called on component with no DOM or markers.',
+						this
+					);
+				else if (!this._isMounted)
+					// eslint-disable-next-line no-console
+					console.warn(
+						'PicoJSX: update() called on component not marked as mounted.',
+						this
+					);
 				return;
 			}
 
@@ -342,9 +449,27 @@ const PicoJSX = (() => {
 			const isFragmentRoot = !!(this._startMarker && this._endMarker);
 
 			if (isFragmentRoot) {
-				parentNode = this._startMarker.parentNode;
-				if (!parentNode || parentNode !== this._endMarker.parentNode) {
-					console.warn("PicoJSX: Markers detached or have different parents during update. Aborting update.", this);
+				// Ensure markers are not null before accessing parentNode
+				if (this._startMarker && this._endMarker) {
+					parentNode = this._startMarker.parentNode;
+					if (
+						!parentNode ||
+						parentNode !== this._endMarker.parentNode
+					) {
+						// eslint-disable-next-line no-console
+						console.warn(
+							'PicoJSX: Markers detached or have different parents during update. Aborting update.',
+							this
+						);
+						return;
+					}
+				} else {
+					// This case should ideally not be reached if isFragmentRoot is true
+					// eslint-disable-next-line no-console
+					console.warn(
+						'PicoJSX: Inconsistent fragment markers state during update.',
+						this
+					);
 					return;
 				}
 			} else if (this._dom?.parentNode) {
@@ -352,7 +477,11 @@ const PicoJSX = (() => {
 			}
 
 			if (!parentNode) {
-				console.warn("PicoJSX: update() called on detached component.", this);
+				// eslint-disable-next-line no-console
+				console.warn(
+					'PicoJSX: update() called on detached component.',
+					this
+				);
 				return;
 			}
 
@@ -371,9 +500,14 @@ const PicoJSX = (() => {
 				let isInBoundary = false;
 				if (isFragmentRoot) {
 					// Check if focused element is between the markers
-					isInBoundary = activeElement !== this._startMarker && activeElement !== this._endMarker &&
-						this._startMarker.compareDocumentPosition(activeElement) & Node.DOCUMENT_POSITION_FOLLOWING &&
-						this._endMarker.compareDocumentPosition(activeElement) & Node.DOCUMENT_POSITION_PRECEDING;
+					isInBoundary =
+						activeElement !== this._startMarker &&
+						activeElement !== this._endMarker &&
+						this._startMarker.compareDocumentPosition(
+							activeElement
+						) & Node.DOCUMENT_POSITION_FOLLOWING &&
+						this._endMarker.compareDocumentPosition(activeElement) &
+							Node.DOCUMENT_POSITION_PRECEDING;
 				} else if (this._dom?.contains(activeElement)) {
 					// Check if focused element is within the component's root DOM node
 					isInBoundary = true;
@@ -391,7 +525,10 @@ const PicoJSX = (() => {
 			// Render the new DOM structure
 			const childrenMountQueue = [];
 			const newRenderOutput = this.render();
-			const newDom = _buildDomAndCollectMounts(newRenderOutput, childrenMountQueue);
+			const newDom = _buildDomAndCollectMounts(
+				newRenderOutput,
+				childrenMountQueue
+			);
 
 			if (isFragmentRoot) {
 				// Update for fragment root: remove old nodes between markers, insert new ones
@@ -404,8 +541,12 @@ const PicoJSX = (() => {
 				}
 				parentNode.insertBefore(newDom, oldEndMarker);
 				// Keep _dom as a reference, maybe useful later? But markers are key.
-				this._dom = newDom instanceof DocumentFragment ? newDom : document.createDocumentFragment();
-				if (!(newDom instanceof DocumentFragment) && newDom) this._dom.appendChild(newDom);
+				this._dom =
+					newDom instanceof DocumentFragment
+						? newDom
+						: document.createDocumentFragment();
+				if (!(newDom instanceof DocumentFragment) && newDom)
+					this._dom.appendChild(newDom);
 			} else {
 				// Update for single element root: replace the old DOM node with the new one
 				if (oldDomContent) disposeNode(oldDomContent, this); // Clean up old content
@@ -422,12 +563,13 @@ const PicoJSX = (() => {
 
 			// Process any new child components that need mounting
 			const uniqueChildrenMountQueue = [...new Set(childrenMountQueue)];
-			uniqueChildrenMountQueue.forEach(comp => {
+			uniqueChildrenMountQueue.forEach((comp) => {
 				let isConnected = false;
 				if (comp._startMarker && comp._endMarker) {
 					// Check fragment markers are connected
-					isConnected = comp._startMarker.parentNode === parentNode &&
-								  comp._endMarker.parentNode === parentNode;
+					isConnected =
+						comp._startMarker.parentNode === parentNode &&
+						comp._endMarker.parentNode === parentNode;
 				} else if (comp._dom instanceof Node) {
 					// Check standard DOM node is connected
 					isConnected = comp._dom.isConnected;
@@ -436,11 +578,18 @@ const PicoJSX = (() => {
 				if (isConnected && !comp._isMounted && !comp._isUnmounted) {
 					// Call didMount and update flags if connected
 					if (typeof comp.componentDidMount === 'function') {
-						try { comp.componentDidMount(); }
-						catch (e) { console.error(`PicoJSX: Error in componentDidMount of ${comp.constructor.name}`, e); }
+						try {
+							comp.componentDidMount();
+						} catch (e) {
+							// eslint-disable-next-line no-console
+							console.error(
+								`PicoJSX: Error in componentDidMount of ${comp.constructor.name}`,
+								e
+							);
+						}
+						comp._isMounted = true;
+						comp._isUnmounted = false;
 					}
-					comp._isMounted = true;
-					comp._isUnmounted = false;
 				}
 			});
 
@@ -459,32 +608,55 @@ const PicoJSX = (() => {
 						let current = oldStartMarker.nextSibling;
 						while (current && current !== oldEndMarker) {
 							if (current.nodeType === Node.ELEMENT_NODE) {
-								if (current.id === focusedElementId) { elementToFocus = current; break; }
+								if (current.id === focusedElementId) {
+									elementToFocus = current;
+									break;
+								}
 								// Check descendants too
-								if (typeof current.querySelector === 'function') {
-									elementToFocus = current.querySelector(`#${focusedElementId}`);
+								if (
+									typeof current.querySelector === 'function'
+								) {
+									elementToFocus = current.querySelector(
+										`#${focusedElementId}`
+									);
 									if (elementToFocus) break;
 								}
 							}
 							current = current.nextSibling;
 						}
-					} else if (this._dom?.id === focusedElementId && typeof this._dom.focus === 'function') {
+					} else if (
+						this._dom?.id === focusedElementId &&
+						typeof this._dom.focus === 'function'
+					) {
 						// Check if the root element itself is the one
 						elementToFocus = this._dom;
 					} else if (typeof this._dom?.querySelector === 'function') {
 						// Search within the root element
-						elementToFocus = this._dom.querySelector(`#${focusedElementId}`);
+						elementToFocus = this._dom.querySelector(
+							`#${focusedElementId}`
+						);
 					}
 				}
 				if (elementToFocus) {
 					try {
 						elementToFocus.focus();
 						// Restore cursor position if saved
-						if (selectionStart !== null && typeof elementToFocus.setSelectionRange === 'function') {
-							elementToFocus.setSelectionRange(selectionStart, selectionEnd);
+						if (
+							selectionStart !== null &&
+							typeof elementToFocus.setSelectionRange ===
+								'function'
+						) {
+							elementToFocus.setSelectionRange(
+								selectionStart,
+								selectionEnd
+							);
 						}
 					} catch (e) {
-						console.warn(`PicoJSX: Failed focus/selection restore for #${focusedElementId}`, e);
+						// eslint-disable-next-line no-console
+						console.warn(
+							`PicoJSX: Failed focus/selection restore for #${focusedElementId}`,
+							e
+						);
 					}
 				}
 			}
@@ -492,7 +664,9 @@ const PicoJSX = (() => {
 		}
 
 		/** @abstract @returns {*} */
-		render() { throw new Error('PicoJSX: Component has no render method.'); }
+		render() {
+			throw new Error('PicoJSX: Component has no render method.');
+		}
 		componentDidMount() {}
 		componentWillUnmount() {}
 		/** @param {object} prevProps @param {object} prevState */
@@ -517,15 +691,20 @@ const PicoJSX = (() => {
 				const stored = localStorage.getItem(storageKey);
 				if (stored !== null) {
 					state = JSON.parse(stored);
-					// console.log(`PicoJSX Store: State loaded for "${storageKey}"`);
 				}
 			} catch (e) {
-				console.error(`PicoJSX Store: Error loading state for "${storageKey}"`, e);
+				// eslint-disable-next-line no-console
+				console.error(
+					`PicoJSX Store: Error loading state for "${storageKey}"`,
+					e
+				);
 			}
 		}
 
 		/** Get the current state. @returns {*} */
-		function getState() { return state; }
+		function getState() {
+			return state;
+		}
 
 		/**
 		 * Update the store's state, persist if needed, and notify listeners.
@@ -533,21 +712,32 @@ const PicoJSX = (() => {
 		 */
 		function setState(updater) {
 			const oldState = state;
-			state = typeof updater === 'function' ? updater(state) : { ...state, ...updater };
+			state =
+				typeof updater === 'function'
+					? updater(state)
+					: { ...state, ...updater };
 			if (storageKey) {
 				// Persist to localStorage if key exists
 				try {
 					localStorage.setItem(storageKey, JSON.stringify(state));
 				} catch (e) {
-					console.error(`PicoJSX Store: Error saving state for "${storageKey}"`, e);
+					// eslint-disable-next-line no-console
+					console.error(
+						`PicoJSX Store: Error saving state for "${storageKey}"`,
+						e
+					);
 				}
 			}
 			// Notify all listeners
-			listeners.forEach(listener => {
+			listeners.forEach((listener) => {
 				try {
 					listener(state, oldState);
 				} catch (e) {
-					console.error(`PicoJSX Store: Error in listener for "${storageKey || 'default'}"`, e);
+					// eslint-disable-next-line no-console
+					console.error(
+						`PicoJSX Store: Error in listener for "${storageKey || 'default'}"`,
+						e
+					);
 				}
 			});
 		}
@@ -558,7 +748,8 @@ const PicoJSX = (() => {
 		 * @returns {Function} An unsubscribe function.
 		 */
 		function subscribe(listener) {
-			if (typeof listener !== 'function') throw new Error('PicoJSX Store: Listener must be a function.');
+			if (typeof listener !== 'function')
+				throw new Error('PicoJSX Store: Listener must be a function.');
 			listeners.add(listener);
 			return () => listeners.delete(listener);
 		}
@@ -573,10 +764,22 @@ const PicoJSX = (() => {
 	 * @param {Element} parentDomElement - Container element.
 	 */
 	function render(jsxInput, parentDomElement) {
-		if (!parentDomElement || !(parentDomElement instanceof Element)) {
-			throw new Error('PicoJSX: Target parent DOM element is missing or invalid.');
+		if (!(parentDomElement instanceof HTMLElement)) {
+			// Or throw a more specific error if only HTMLElements are truly supported for all operations
+			// eslint-disable-next-line no-console
+			console.warn(
+				'PicoJSX: parentDomElement is not an HTMLElement. Some operations might be limited.'
+			);
 		}
-		Array.from(parentDomElement.childNodes).forEach(node => disposeNode(node));
+
+		if (!parentDomElement || !(parentDomElement instanceof Element)) {
+			throw new Error(
+				'PicoJSX: Target parent DOM element is missing or invalid.'
+			);
+		}
+		Array.from(parentDomElement.childNodes).forEach((node) =>
+			disposeNode(node)
+		);
 		parentDomElement.innerHTML = ''; // Clear previous content
 
 		const mountQueue = [];
@@ -584,7 +787,7 @@ const PicoJSX = (() => {
 
 		let topLevelInstance = null;
 		let startMarker = null; // For root fragments
-		let endMarker = null;   // For root fragments
+		let endMarker = null; // For root fragments
 		let isRootFragment = false;
 
 		if (jsxInput?.constructor?.isPicoClassComponent) {
@@ -598,8 +801,12 @@ const PicoJSX = (() => {
 
 		if (isRootFragment) {
 			// Use comment markers to delineate the fragment's content in the parent
-			startMarker = document.createComment(`Pico Start: ${topLevelInstance?.constructor?.name || 'RootFragment'}`);
-			endMarker = document.createComment(`Pico End: ${topLevelInstance?.constructor?.name || 'RootFragment'}`);
+			startMarker = document.createComment(
+				`Pico Start: ${topLevelInstance?.constructor?.name || 'RootFragment'}`
+			);
+			endMarker = document.createComment(
+				`Pico End: ${topLevelInstance?.constructor?.name || 'RootFragment'}`
+			);
 			parentDomElement.appendChild(startMarker);
 			if (domToAppend) parentDomElement.appendChild(domToAppend);
 			parentDomElement.appendChild(endMarker);
@@ -623,13 +830,22 @@ const PicoJSX = (() => {
 		// Defer componentDidMount calls until after the current JS execution block completes
 		// This ensures the DOM is fully attached and rendered by the browser.
 		setTimeout(() => {
-			uniqueMountQueue.forEach(componentInstance => {
-				if (!componentInstance._isMounted && !componentInstance._isUnmounted) {
+			uniqueMountQueue.forEach((componentInstance) => {
+				if (
+					!componentInstance._isMounted &&
+					!componentInstance._isUnmounted
+				) {
 					let isConnected = false;
-					if (componentInstance._startMarker && componentInstance._endMarker) {
+					if (
+						componentInstance._startMarker &&
+						componentInstance._endMarker
+					) {
 						// Check fragment markers are connected
-						isConnected = componentInstance._startMarker.parentNode === parentDomElement &&
-									  componentInstance._endMarker.parentNode === parentDomElement;
+						isConnected =
+							componentInstance._startMarker.parentNode ===
+								parentDomElement &&
+							componentInstance._endMarker.parentNode ===
+								parentDomElement;
 					} else if (componentInstance._dom instanceof Node) {
 						// Check standard DOM node is connected
 						isConnected = componentInstance._dom.isConnected;
@@ -637,14 +853,27 @@ const PicoJSX = (() => {
 
 					if (isConnected) {
 						// Call didMount and update flags if connected
-						if (typeof componentInstance.componentDidMount === 'function') {
-							try { componentInstance.componentDidMount(); }
-							catch (e) { console.error(`PicoJSX: Error in componentDidMount of ${componentInstance.constructor.name}`, e); }
+						if (
+							typeof componentInstance.componentDidMount ===
+							'function'
+						) {
+							try {
+								componentInstance.componentDidMount();
+							} catch (e) {
+								// eslint-disable-next-line no-console
+								console.error(
+									`PicoJSX: Error in componentDidMount of ${componentInstance.constructor?.name || 'UnknownComponent'}`,
+									e
+								);
+							}
+							componentInstance._isMounted = true;
+							componentInstance._isUnmounted = false;
+						} else {
+							// eslint-disable-next-line no-console
+							console.warn(
+								`PicoJSX Render (Deferred): Skipping mount call for non-connected ${componentInstance.constructor?.name || 'UnknownComponent'}.`
+							);
 						}
-						componentInstance._isMounted = true;
-						componentInstance._isUnmounted = false;
-					} else {
-						 console.warn(`PicoJSX Render (Deferred): Skipping mount call for non-connected ${componentInstance.constructor.name}.`);
 					}
 				}
 			});
@@ -656,7 +885,7 @@ const PicoJSX = (() => {
 		Fragment,
 		render,
 		Component,
-		createStore
+		createStore,
 	};
 })();
 

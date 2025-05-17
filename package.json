@@ -9,7 +9,12 @@
     "picojsx.js",
     "readme.md"
   ],
-  "scripts": {},
+  "scripts": {
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
+    "lint": "eslint . --ext .js",
+    "lint:fix": "eslint . --ext .js --fix",
+    "format": "prettier --write \"**/*.js\""
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/laborin/picojsx.git"
@@ -28,5 +33,15 @@
   "bugs": {
     "url": "https://github.com/laborin/picojsx/issues"
   },
-  "homepage": "https://github.com/laborin/picojsx#readme"
+  "homepage": "https://github.com/laborin/picojsx#readme",
+  "devDependencies": {
+    "@jest/globals": "^29.7.0",
+    "eslint": "^9.27.0",
+    "eslint-config-prettier": "^10.1.5",
+    "eslint-plugin-prettier": "^5.4.0",
+    "globals": "^16.1.0",
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0",
+    "prettier": "^3.5.3"
+  }
 }
