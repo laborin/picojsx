@@ -2,7 +2,7 @@
 
 PicoJSX is a lightweight frontend library inspired by Nano JSX, designed for creating user interfaces using JSX or direct calls to the `h` (hyperscript) function. It offers a component model with state, lifecycle methods, an optional global store with `localStorage` persistence, and automatic/manual UI update management.
 
-**Version:** 1.3.1
+**Version:** 1.0.0
 
 ## Key Features
 
@@ -24,33 +24,107 @@ PicoJSX is a lightweight frontend library inspired by Nano JSX, designed for cre
 
 ## Installation / Usage
 
-1.  **Save the PicoJSX code:** Grab the `picojsx.js` file.
-2.  **Include it in your HTML:**
-    ```html
-    <script src="path/to/picojsx.js"></script>
+1.  **Install from npm:**
+    Open your project's terminal and run:
+    ```bash
+    npm install @laborin/picojsx
+    # or if you use yarn
+    # yarn add @laborin/picojsx
     ```
-3.  **Configure your JSX transpiler (if using JSX):**
-    Make sure your build tool (like `esbuild`, Babel, etc.) is set up to use PicoJSX's pragmas. Add these comments at the top of your `.js` or `.jsx` files that use JSX:
+
+2.  **Import PicoJSX in your JavaScript/JSX files:**
     ```javascript
-    /** @jsx PicoJSX.h */
-    /** @jsxFrag PicoJSX.Fragment */
+    // You can import the full PicoJSX object
+    import PicoJSX from '@laborin/picojsx';
+    // Or import specific parts you need (recommended)
+    import { h, Fragment, render, Component, createStore } from '@laborin/picojsx';
     ```
+    (See "Main API" section below for more on imports).
+
+3.  **Configure your JSX transpiler (if using JSX):**
+    When you use JSX syntax, your code needs to be transformed into JavaScript function calls. This is done by a transpiler like Babel, esbuild, or the TypeScript compiler.
+
+    You need to tell the transpiler which functions to use for this transformation. For PicoJSX, these are `PicoJSX.h` (or just `h` if imported directly) for elements, and `PicoJSX.Fragment` (or `Fragment`) for JSX fragments (`<></>`).
+
+    There are two main ways to configure this:
+
+    *   **Global Configuration (Recommended for most projects):**
+        You can set the JSX factory and fragment functions globally in your build tool's configuration. This way, you don't need to add comments to every JSX file.
+        *   **For Babel:** In your `babel.config.js` or `.babelrc` file, you would use the classic runtime configuration with `@babel/preset-react`. If you are using Webpack, you would typically configure `babel-loader` to use this Babel configuration.
+            ```json
+            {
+              "presets": [[
+                "@babel/preset-react", 
+                {
+                  "pragma": "PicoJSX.h",          // Or "h" if using named imports and configuring pragma accordingly
+                  "pragmaFrag": "PicoJSX.Fragment" // Or "Fragment" if using named imports
+                }
+              ]]
+            }
+            ```
+            Make sure to import `PicoJSX` or `h` and `Fragment` in the scope where JSX is used if your transpiler doesn't handle automatic imports based on these pragmas.
+
+        *   **For esbuild:** When calling esbuild from the command line or in its API options:
+            ```bash
+            esbuild yourfile.jsx --jsx-factory=PicoJSX.h --jsx-fragment=PicoJSX.Fragment --bundle ...
+            # Or if using named imports: esbuild yourfile.jsx --jsx-factory=h --jsx-fragment=Fragment ...
+            ```
+        *   **For TypeScript:** In your `tsconfig.json`. Typically, you'd set `"jsx": "preserve"` to let another tool (like Babel or esbuild) handle the transformation. If TypeScript were to handle it directly with custom pragmas (less common for libraries not named React), it might look like:
+            ```json
+            {
+              "compilerOptions": {
+                // Best approach: preserve JSX and let Babel/esbuild handle it with the pragmas above.
+                "jsx": "preserve", 
+
+                // Alternative: If TypeScript were to transpile to PicoJSX directly (requires TS 4.0+ for jsxFactory/jsxFragmentFactory)
+                // "jsx": "react", // Tells TS to use a factory, but we specify which one below
+                // "jsxFactory": "PicoJSX.h",          // Or "h" if that's what you import
+                // "jsxFragmentFactory": "PicoJSX.Fragment" // Or "Fragment"
+              }
+            }
+            ```
+            For most setups, `"jsx": "preserve"` in `tsconfig.json` combined with Babel or esbuild configured for PicoJSX pragmas is the most straightforward path.
+
+    *   **Per-File Pragma Comments (Needed if no global config or for overrides):**
+        If you haven't configured your transpiler globally, or if you need to override a global setting for a specific file (like for using React for the full project but PicoJSX for a single component), you can add these comments at the top of your `.js` or `.jsx` file:
+
+        *   If you import the default `PicoJSX` object:
+            ```javascript
+            import PicoJSX from '@laborin/picojsx';
+
+            /** @jsx PicoJSX.h */
+            /** @jsxFrag PicoJSX.Fragment */
+            ```
+        *   If you use named imports for `h` and `Fragment`:
+            ```javascript
+            import { h, Fragment } from '@laborin/picojsx';
+
+            /** @jsx h */
+            /** @jsxFrag Fragment */
+            ```
+        The per-file pragma tells the transpiler what to use for that specific file.
+
+    **Why are these needed?** JSX is just syntactic sugar. It looks like HTML but isn't valid JavaScript on its own. A transpiler converts `<div />` into `h('div')` (or `PicoJSX.h('div')`). The pragmas tell the transpiler *which exact function* to call.
 
 ## Main API
 
-The library exposes these key parts through the global `PicoJSX` object (or via module imports if you're using ES Modules):
+The library exposes these key parts. When using npm and ES modules, you'll typically use named imports.
 
-*   `PicoJSX.h`
-*   `PicoJSX.Fragment`
-*   `PicoJSX.render`
-*   `PicoJSX.Component`
-*   `PicoJSX.createStore`
+*   `h`: The hyperscript function (JSX factory). (`PicoJSX.h` if using default import).
+*   `Fragment`: The Fragment symbol. (`PicoJSX.Fragment` if using default import).
+*   `render`: Function to render components into the DOM.
+*   `Component`: Base class for stateful components.
+*   `createStore`: Function to create a global store.
 
-If using ES6 modules:
+If using ES6 modules (recommended way after `npm install`):
 ```javascript
-import PicoJSX, { h, Fragment, render, Component, createStore } from './path/to/picojsx.js';
-// Or just import what you need:
-// import { h, Component } from './path/to/picojsx.js';
+// Recommended: Use named imports for clarity, especially for h and Fragment with JSX
+import { h, Fragment, render, Component, createStore } from '@laborin/picojsx';
+
+// Alternatively, you can import the default object that contains all exports
+import PicoJSX from '@laborin/picojsx';
+// Then you might use PicoJSX.h, PicoJSX.Fragment, etc.
+// And your pragmas would be /** @jsx PicoJSX.h */ and /** @jsxFrag PicoJSX.Fragment */
 ```
 
 ---
@@ -424,10 +498,10 @@ The `createStore` function returns a store object with three methods:
 /** @jsx PicoJSX.h */
 const { createStore, Component, render } = PicoJSX;
 
-// 1. Create the store
+// Create the store
 const counterStore = createStore({ count: 0 });
 
-// 2. Create a component that uses the store
+// Create a component that uses the store
 class StoreCounterDisplay extends Component {
   constructor(props) {
     super(props);
@@ -532,7 +606,7 @@ Here's a slightly more involved example showing a counter, an input, dynamically
         /** @jsxFrag PicoJSX.Fragment */
         const { h, Fragment, render, Component, createStore } = PicoJSX;
 
-        // === 1. Persistent Global Store for Theme ===
+        // === Persistent Global Store for Theme ===
         const themeStore = createStore(
             { currentTheme: 'light' }, // Default theme
             { storageKey: 'appThemeStore' } // Saves to localStorage
@@ -545,7 +619,7 @@ Here's a slightly more involved example showing a counter, an input, dynamically
             }));
         }
 
-        // === 2. Child Component ===
+        // === Child Component ===
         class Child extends Component {
             componentDidMount() {
                 console.log('Child mounted with message:', this.props.message);
@@ -564,7 +638,7 @@ Here's a slightly more involved example showing a counter, an input, dynamically
             }
         }
 
-        // === 3. Main App Component ===
+        // === Main App Component ===
         class App extends Component {
             constructor(props) {
                 super(props);
@@ -774,7 +848,7 @@ A quick summary of when they fire:
 
 *   **`constructor(props)`:** When `new MyComponent(props)` happens (usually inside `h`).
 *   **`render()`:** During initial build (`_buildDomAndCollectMounts`) and at the start of `update()`.
-*   **`componentDidMount()`:** Asynchronously (`setTimeout`) after the *initial* `PicoJSX.render()` finishes and the element is in the DOM. Also called for new children added during parent `update`s (synchronously within that update, after their DOM is attached).
+*   **`componentDidMount()`:** Asynchronously (`setTimeout`) after the *initial* `PicoJSX.render()` finishes and the element is in the DOM. Also called for new children added during parent updates (synchronously within that update, after their DOM is attached).
 *   **`componentWillUnmount()`:** Called by `disposeNode` just before a component's DOM nodes are removed (during parent updates or `render` clearing).
 *   **`componentDidUpdate(prevProps, prevState)`:** Called at the *end* of the `update()` method, after DOM changes are complete. Not called on initial render.
 
@@ -796,4 +870,3 @@ A quick summary of when they fire:
 *   Used by `render` when clearing the container and by `update` when replacing old content.
 
 Hopefully, this gives a clearer picture of PicoJSX's internals! Happy coding!
-This internal overview should help you understand the lifecycle of elements and components within PicoJSX. Happy coding!
