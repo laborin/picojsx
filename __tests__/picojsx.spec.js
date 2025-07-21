@@ -938,4 +938,187 @@ describe('render function and DOM manipulation', () => {
 	});
 });
 
+describe('Focus restoration', () => {
+	let container;
+
+	beforeEach(() => {
+		container = document.createElement('div');
+		document.body.appendChild(container);
+		jest.useFakeTimers();
+	});
+
+	afterEach(() => {
+		jest.runOnlyPendingTimers();
+		jest.useRealTimers();
+		document.body.removeChild(container);
+		container = null;
+	});
+
+	it('should restore focus to element with ID (backward compatibility)', () => {
+		class FocusTestComponent extends PicoComponent {
+			constructor(props) {
+				super(props);
+				this.state = { count: 0 };
+			}
+
+			render() {
+				return h('div', null, [
+					h('input', { id: 'my-input', value: this.state.count }),
+					h('button', { onClick: () => this.setState({ count: this.state.count + 1 }) }, 'Update')
+				]);
+			}
+		}
+
+		PicoJSX.render(h(FocusTestComponent), container);
+		jest.advanceTimersByTime(0); // Process componentDidMount
+
+		const input = container.querySelector('#my-input');
+		input.focus();
+		expect(document.activeElement).toBe(input);
+
+		// Trigger update
+		const button = container.querySelector('button');
+		button.click();
+
+		// Focus should be restored
+		expect(document.activeElement).toBe(container.querySelector('#my-input'));
+	});
+
+	it('should restore focus using path when element has no ID', () => {
+		class FocusTestComponent extends PicoComponent {
+			constructor(props) {
+				super(props);
+				this.state = { count: 0 };
+			}
+
+			render() {
+				return h('div', null, [
+					h('div', null, [
+						h('input', { value: this.state.count, type: 'text' }),
+						h('input', { value: 'other', type: 'email' })
+					]),
+					h('button', { onClick: () => this.setState({ count: this.state.count + 1 }) }, 'Update')
+				]);
+			}
+		}
+
+		PicoJSX.render(h(FocusTestComponent), container);
+		jest.advanceTimersByTime(0); // Process componentDidMount
+
+		const firstInput = container.querySelector('input[type="text"]');
+		firstInput.focus();
+		firstInput.setSelectionRange(1, 1); // Set cursor position
+		expect(document.activeElement).toBe(firstInput);
+
+		// Trigger update
+		const button = container.querySelector('button');
+		button.click();
+
+		// Focus should be restored to the same input
+		const newFirstInput = container.querySelector('input[type="text"]');
+		expect(document.activeElement).toBe(newFirstInput);
+		expect(newFirstInput.value).toBe('1'); // Value updated
+		expect(newFirstInput.selectionStart).toBe(1); // Cursor position restored
+		expect(newFirstInput.selectionEnd).toBe(1);
+	});
+
+	it('should not restore focus if element type changes', () => {
+		class FocusTestComponent extends PicoComponent {
+			constructor(props) {
+				super(props);
+				this.state = { isInput: true };
+			}
+
+			render() {
+				return h('div', null, [
+					this.state.isInput 
+						? h('input', { value: 'test' })
+						: h('textarea', { value: 'test' }),
+					h('button', { onClick: () => this.setState({ isInput: false }) }, 'Change Type')
+				]);
+			}
+		}
+
+		PicoJSX.render(h(FocusTestComponent), container);
+		jest.advanceTimersByTime(0); // Process componentDidMount
+
+		const input = container.querySelector('input');
+		input.focus();
+		expect(document.activeElement).toBe(input);
+
+		// Trigger update that changes element type
+		const button = container.querySelector('button');
+		button.click();
+
+		// Focus should NOT be restored since element type changed
+		expect(document.activeElement).not.toBe(container.querySelector('textarea'));
+	});
+
+	it('should restore focus in fragment components', () => {
+		class FragmentFocusComponent extends PicoComponent {
+			constructor(props) {
+				super(props);
+				this.state = { count: 0 };
+			}
+
+			render() {
+				return h(PicoJSX.Fragment, null, [
+					h('input', { value: this.state.count }),
+					h('button', { onClick: () => this.setState({ count: this.state.count + 1 }) }, 'Update')
+				]);
+			}
+		}
+
+		PicoJSX.render(h(FragmentFocusComponent), container);
+		jest.advanceTimersByTime(0); // Process componentDidMount
+
+		const input = container.querySelector('input');
+		input.focus();
+		expect(document.activeElement).toBe(input);
+
+		// Trigger update
+		const button = container.querySelector('button');
+		button.click();
+
+		// Focus should be restored in fragment
+		expect(document.activeElement).toBe(container.querySelector('input'));
+	});
+
+	it('should handle nested focus restoration', () => {
+		class NestedFocusComponent extends PicoComponent {
+			constructor(props) {
+				super(props);
+				this.state = { count: 0 };
+			}
+
+			render() {
+				return h('div', null, [
+					h('div', null, [
+						h('div', null, [
+							h('input', { value: `nested-${this.state.count}` })
+						])
+					]),
+					h('button', { onClick: () => this.setState({ count: this.state.count + 1 }) }, 'Update')
+				]);
+			}
+		}
+
+		PicoJSX.render(h(NestedFocusComponent), container);
+		jest.advanceTimersByTime(0); // Process componentDidMount
+
+		const input = container.querySelector('input');
+		input.focus();
+		expect(document.activeElement).toBe(input);
+
+		// Trigger update
+		const button = container.querySelector('button');
+		button.click();
+
+		// Focus should be restored to nested input
+		const newInput = container.querySelector('input');
+		expect(document.activeElement).toBe(newInput);
+		expect(newInput.value).toBe('nested-1');
+	});
+});
+
 // Further tests for Component lifecycle, setState DOM updates, etc.

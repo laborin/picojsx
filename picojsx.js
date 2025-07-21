@@ -347,6 +347,69 @@ const PicoJSX = (() => {
 	}
 
 	/**
+	 * Calculates the path from a root element to a target element.
+	 * @param {Node} root - The root element to start from
+	 * @param {Node} target - The target element to find the path to
+	 * @returns {number[]|null} Array of child indices representing the path, or null if not found
+	 */
+	function calculateElementPath(root, target) {
+		if (!root || !target || root === target) return null;
+		
+		const path = [];
+		let current = target;
+		
+		// Walk up from target to root, building path in reverse
+		while (current && current.parentNode && current !== root) {
+			const parent = current.parentNode;
+			// Skip text nodes when counting siblings
+			const children = Array.from(parent.childNodes).filter(
+				node => node.nodeType === Node.ELEMENT_NODE || node === current
+			);
+			const index = children.indexOf(current);
+			if (index === -1) return null; // Target not found in parent's children
+			path.unshift(index);
+			current = parent;
+		}
+		
+		// Verify we reached the root
+		if (current !== root && current.parentNode !== root) return null;
+		
+		// If current.parentNode === root, add the final index
+		if (current.parentNode === root) {
+			const children = Array.from(root.childNodes).filter(
+				node => node.nodeType === Node.ELEMENT_NODE
+			);
+			const index = children.indexOf(current);
+			if (index === -1) return null;
+			path.unshift(index);
+		}
+		
+		return path;
+	}
+
+	/**
+	 * Traverses a path from root element to find the target element.
+	 * @param {Node} root - The root element to start from
+	 * @param {number[]} path - Array of child indices to follow
+	 * @returns {Element|null} The element at the path, or null if not found
+	 */
+	function traverseElementPath(root, path) {
+		if (!root || !path || path.length === 0) return null;
+		
+		let current = root;
+		for (const index of path) {
+			// Get only element children (skip text nodes)
+			const children = Array.from(current.childNodes).filter(
+				node => node.nodeType === Node.ELEMENT_NODE
+			);
+			if (index >= children.length) return null;
+			current = children[index];
+		}
+		
+		return current;
+	}
+
+	/**
 	 * Base class for PicoJSX stateful components.
 	 * Provides state management, lifecycle methods, and update mechanism.
 	 * @class Component
@@ -518,12 +581,16 @@ const PicoJSX = (() => {
 			const oldEndMarker = this._endMarker;
 
 			let focusedElementId = null;
+			let focusedElementPath = null;
+			let focusedElementInfo = null;
 			let selectionStart = null;
 			let selectionEnd = null;
 			const activeElement = document.activeElement;
 			// Attempt to preserve focus within the component's boundary
 			if (activeElement) {
 				let isInBoundary = false;
+				let rootForPath = null;
+				
 				if (isFragmentRoot) {
 					// Check if focused element is between the markers
 					isInBoundary =
@@ -534,12 +601,62 @@ const PicoJSX = (() => {
 						) & Node.DOCUMENT_POSITION_FOLLOWING &&
 						this._endMarker.compareDocumentPosition(activeElement) &
 							Node.DOCUMENT_POSITION_PRECEDING;
+					if (isInBoundary) {
+						// For fragments, we need to use the parent node as root
+						rootForPath = parentNode;
+					}
 				} else if (this._dom?.contains(activeElement)) {
 					// Check if focused element is within the component's root DOM node
 					isInBoundary = true;
+					rootForPath = this._dom;
 				}
-				if (isInBoundary && activeElement.id) {
-					focusedElementId = activeElement.id;
+				
+				if (isInBoundary) {
+					// First try to use ID if available (backward compatibility)
+					if (activeElement.id) {
+						focusedElementId = activeElement.id;
+					} else {
+						// Calculate path-based location
+						if (isFragmentRoot) {
+							// For fragments, we need to find the index of the focused element
+							// among the elements between the markers
+							const fragmentElements = [];
+							let current = this._startMarker.nextSibling;
+							while (current && current !== this._endMarker) {
+								if (current.nodeType === Node.ELEMENT_NODE) {
+									fragmentElements.push(current);
+								}
+								current = current.nextSibling;
+							}
+							
+							// Check if activeElement is one of the fragment elements or contained within them
+							for (let i = 0; i < fragmentElements.length; i++) {
+								const elem = fragmentElements[i];
+								if (elem === activeElement) {
+									focusedElementPath = ['fragment', i];
+									break;
+								} else if (elem.contains(activeElement)) {
+									const subPath = calculateElementPath(elem, activeElement);
+									if (subPath) {
+										focusedElementPath = ['fragment', i, ...subPath];
+									}
+									break;
+								}
+							}
+						} else {
+							focusedElementPath = calculateElementPath(rootForPath, activeElement);
+						}
+						
+						if (focusedElementPath) {
+							// Store additional info to verify we're restoring to the same type of element
+							focusedElementInfo = {
+								tagName: activeElement.tagName,
+								type: activeElement.type || null,
+								className: activeElement.className || null
+							};
+						}
+					}
+					
 					// Try to save cursor position too, if applicable
 					if (typeof activeElement.selectionStart === 'number') {
 						selectionStart = activeElement.selectionStart;
@@ -625,14 +742,16 @@ const PicoJSX = (() => {
 			}
 
 			// Attempt to restore focus
+			let elementToFocus = null;
+			
 			if (focusedElementId) {
-				let elementToFocus = null;
+				// ID-based restoration (backward compatibility)
 				let searchContext = isFragmentRoot ? parentNode : this._dom;
 				if (searchContext) {
 					if (isFragmentRoot) {
 						// Search between markers for the element by ID
-						let current = oldStartMarker.nextSibling;
-						while (current && current !== oldEndMarker) {
+						let current = this._startMarker.nextSibling;
+						while (current && current !== this._endMarker) {
 							if (current.nodeType === Node.ELEMENT_NODE) {
 								if (current.id === focusedElementId) {
 									elementToFocus = current;
@@ -663,27 +782,77 @@ const PicoJSX = (() => {
 						);
 					}
 				}
-				if (elementToFocus) {
-					try {
-						elementToFocus.focus();
-						// Restore cursor position if saved
-						if (
-							selectionStart !== null &&
-							typeof elementToFocus.setSelectionRange ===
-								'function'
-						) {
-							elementToFocus.setSelectionRange(
-								selectionStart,
-								selectionEnd
-							);
+			} else if (focusedElementPath && focusedElementInfo) {
+				// Path-based restoration (new approach)
+				if (isFragmentRoot && focusedElementPath[0] === 'fragment') {
+					// For fragments, find elements between the markers
+					const fragmentElements = [];
+					let current = this._startMarker.nextSibling;
+					while (current && current !== this._endMarker) {
+						if (current.nodeType === Node.ELEMENT_NODE) {
+							fragmentElements.push(current);
 						}
-					} catch (e) {
-						// eslint-disable-next-line no-console
-						console.warn(
-							`PicoJSX: Failed focus/selection restore for #${focusedElementId}`,
-							e
+						current = current.nextSibling;
+					}
+					
+					// Get the element at the saved index
+					const index = focusedElementPath[1];
+					if (index < fragmentElements.length) {
+						const rootElem = fragmentElements[index];
+						
+						// If there's a sub-path, traverse from this root
+						if (focusedElementPath.length > 2) {
+							const subPath = focusedElementPath.slice(2);
+							const candidate = traverseElementPath(rootElem, subPath);
+							if (candidate && 
+								candidate.tagName === focusedElementInfo.tagName &&
+								(candidate.type || null) === focusedElementInfo.type) {
+								elementToFocus = candidate;
+							}
+						} else {
+							// The root element itself was focused
+							if (rootElem && 
+								rootElem.tagName === focusedElementInfo.tagName &&
+								(rootElem.type || null) === focusedElementInfo.type) {
+								elementToFocus = rootElem;
+							}
+						}
+					}
+				} else {
+					// For regular components
+					const rootForPath = this._dom;
+					if (rootForPath) {
+						const candidate = traverseElementPath(rootForPath, focusedElementPath);
+						// Verify it's the same type of element
+						if (candidate && 
+							candidate.tagName === focusedElementInfo.tagName &&
+							(candidate.type || null) === focusedElementInfo.type) {
+							elementToFocus = candidate;
+						}
+					}
+				}
+			}
+			
+			if (elementToFocus) {
+				try {
+					elementToFocus.focus();
+					// Restore cursor position if saved
+					if (
+						selectionStart !== null &&
+						typeof elementToFocus.setSelectionRange ===
+							'function'
+					) {
+						elementToFocus.setSelectionRange(
+							selectionStart,
+							selectionEnd
 						);
 					}
+				} catch (e) {
+					// eslint-disable-next-line no-console
+					console.warn(
+						`PicoJSX: Failed focus/selection restore`,
+						e
+					);
 				}
 			}
 			this._prevState = null; // Clear saved previous state
