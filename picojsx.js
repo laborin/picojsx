@@ -393,6 +393,10 @@ const PicoJSX = (() => {
 			this._startMarker = null;
 			/** @protected @type {Comment|null} End marker for fragment roots. */
 			this._endMarker = null;
+			/** @type {number} Debounce delay in milliseconds for the update() method. Set to 0 to disable debouncing. Default is 0. */
+			this.updateDebounceDelay = 0;
+			/** @protected @type {number|null} Timeout ID for the debounced update. */
+			this._updateDebounceTimeout = null;
 		}
 
 		/**
@@ -415,9 +419,31 @@ const PicoJSX = (() => {
 		/**
 		 * Manually triggers a re-render of the component. Handles focus preservation and updates for
 		 * both single-element roots and fragment roots (using markers).
+		 * If updateDebounceDelay is set, the update will be debounced.
 		 * @memberof Component
 		 */
 		update() {
+			// If debouncing is enabled, clear any existing timeout and set a new one
+			if (this.updateDebounceDelay > 0) {
+				if (this._updateDebounceTimeout !== null) {
+					clearTimeout(this._updateDebounceTimeout);
+				}
+				this._updateDebounceTimeout = setTimeout(() => {
+					this._updateDebounceTimeout = null;
+					this._performUpdate();
+				}, this.updateDebounceDelay);
+			} else {
+				// No debouncing, update immediately
+				this._performUpdate();
+			}
+		}
+
+		/**
+		 * Internal method that performs the actual update.
+		 * @protected
+		 * @memberof Component
+		 */
+		_performUpdate() {
 			// Don't update if not mounted, already unmounted, or has no DOM representation
 			if (
 				!this._isMounted ||
@@ -668,7 +694,13 @@ const PicoJSX = (() => {
 			throw new Error('PicoJSX: Component has no render method.');
 		}
 		componentDidMount() {}
-		componentWillUnmount() {}
+		componentWillUnmount() {
+			// Clear any pending debounced update when component is unmounting
+			if (this._updateDebounceTimeout !== null) {
+				clearTimeout(this._updateDebounceTimeout);
+				this._updateDebounceTimeout = null;
+			}
+		}
 		/** @param {object} prevProps @param {object} prevState */
 		componentDidUpdate(prevProps, prevState) {} // eslint-disable-line no-unused-vars
 	}

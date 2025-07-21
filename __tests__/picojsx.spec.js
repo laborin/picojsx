@@ -227,6 +227,230 @@ describe('PicoComponent class', () => {
 	});
 });
 
+describe('Component debouncing', () => {
+	let container;
+
+	beforeEach(() => {
+		container = document.createElement('div');
+		document.body.appendChild(container);
+		jest.useFakeTimers();
+	});
+
+	afterEach(() => {
+		jest.runOnlyPendingTimers();
+		jest.useRealTimers();
+		document.body.removeChild(container);
+		container = null;
+	});
+
+	class DebouncedComponent extends PicoComponent {
+		constructor(props) {
+			super(props);
+			this.state = { count: 0 };
+			this.renderCount = 0;
+			// Set debounce delay from props or default to 100ms
+			this.updateDebounceDelay = props.debounceDelay !== undefined ? props.debounceDelay : 100;
+		}
+
+		render() {
+			this.renderCount++;
+			return h('div', null, `Count: ${this.state.count}, Renders: ${this.renderCount}`);
+		}
+	}
+
+	it('should debounce updates when updateDebounceDelay is set', () => {
+		let componentInstance;
+		
+		class TestDebouncedComponent extends DebouncedComponent {
+			constructor(props) {
+				super(props);
+				componentInstance = this;
+			}
+		}
+		
+		PicoJSX.render(
+			h(TestDebouncedComponent, { debounceDelay: 100 }),
+			container
+		);
+		
+		jest.advanceTimersByTime(0); // Process componentDidMount
+
+		expect(componentInstance.renderCount).toBe(1);
+		expect(container.textContent).toBe('Count: 0, Renders: 1');
+
+		// Trigger multiple rapid state updates
+		componentInstance.setState({ count: 1 });
+		componentInstance.setState({ count: 2 });
+		componentInstance.setState({ count: 3 });
+
+		// Should not have re-rendered yet due to debouncing
+		expect(componentInstance.renderCount).toBe(1);
+		expect(container.textContent).toBe('Count: 0, Renders: 1');
+
+		// Advance time by 50ms (less than debounce delay)
+		jest.advanceTimersByTime(50);
+		expect(componentInstance.renderCount).toBe(1);
+
+		// Advance time by another 60ms (total 110ms, exceeding debounce delay)
+		jest.advanceTimersByTime(60);
+		expect(componentInstance.renderCount).toBe(2);
+		expect(container.textContent).toBe('Count: 3, Renders: 2');
+	});
+
+	it('should not debounce when updateDebounceDelay is 0', () => {
+		let componentInstance;
+		
+		class TestDebouncedComponent extends DebouncedComponent {
+			constructor(props) {
+				super(props);
+				componentInstance = this;
+			}
+		}
+		
+		PicoJSX.render(
+			h(TestDebouncedComponent, { debounceDelay: 0 }),
+			container
+		);
+		
+		jest.advanceTimersByTime(0); // Process componentDidMount
+
+		expect(componentInstance.renderCount).toBe(1);
+
+		// Updates should be immediate
+		componentInstance.setState({ count: 1 });
+		expect(componentInstance.renderCount).toBe(2);
+		expect(container.textContent).toBe('Count: 1, Renders: 2');
+
+		componentInstance.setState({ count: 2 });
+		expect(componentInstance.renderCount).toBe(3);
+		expect(container.textContent).toBe('Count: 2, Renders: 3');
+	});
+
+	it('should cancel pending debounced updates when component unmounts', () => {
+		let componentInstance;
+		
+		class TestDebouncedComponent extends DebouncedComponent {
+			constructor(props) {
+				super(props);
+				componentInstance = this;
+			}
+		}
+		
+		PicoJSX.render(
+			h(TestDebouncedComponent, { debounceDelay: 100 }),
+			container
+		);
+		
+		jest.advanceTimersByTime(0); // Process componentDidMount
+
+		// Trigger a state update
+		componentInstance.setState({ count: 1 });
+		expect(componentInstance.renderCount).toBe(1);
+
+		// Unmount the component before the debounce timeout
+		PicoJSX.render(null, container);
+
+		// Advance time past the debounce delay
+		jest.advanceTimersByTime(150);
+
+		// The update should have been cancelled, renderCount should still be 1
+		expect(componentInstance.renderCount).toBe(1);
+	});
+
+	it('should handle manual update() calls with debouncing', () => {
+		let componentInstance;
+		
+		class TestDebouncedComponent extends DebouncedComponent {
+			constructor(props) {
+				super(props);
+				componentInstance = this;
+			}
+		}
+		
+		PicoJSX.render(
+			h(TestDebouncedComponent, { debounceDelay: 100 }),
+			container
+		);
+		
+		jest.advanceTimersByTime(0); // Process componentDidMount
+
+		componentInstance.autoUpdate = false; // Disable auto-update
+		componentInstance.setState({ count: 1 }); // This won't trigger update due to autoUpdate = false
+
+		expect(componentInstance.renderCount).toBe(1);
+		expect(container.textContent).toBe('Count: 0, Renders: 1');
+
+		// Manually call update multiple times
+		componentInstance.update();
+		componentInstance.update();
+		componentInstance.update();
+
+		// Should still be debounced
+		expect(componentInstance.renderCount).toBe(1);
+
+		jest.advanceTimersByTime(100);
+		expect(componentInstance.renderCount).toBe(2);
+		expect(container.textContent).toBe('Count: 1, Renders: 2');
+	});
+
+	it('should reset debounce timer on each update call', () => {
+		let componentInstance;
+		
+		class TestDebouncedComponent extends DebouncedComponent {
+			constructor(props) {
+				super(props);
+				componentInstance = this;
+			}
+		}
+		
+		PicoJSX.render(
+			h(TestDebouncedComponent, { debounceDelay: 100 }),
+			container
+		);
+		
+		jest.advanceTimersByTime(0); // Process componentDidMount
+
+		componentInstance.setState({ count: 1 });
+		jest.advanceTimersByTime(80); // Almost at the debounce delay
+
+		// Call update again, which should reset the timer
+		componentInstance.setState({ count: 2 });
+		jest.advanceTimersByTime(80); // Another 80ms
+
+		// First timeout should have been cancelled, so still no update
+		expect(componentInstance.renderCount).toBe(1);
+
+		// Advance past the new debounce delay
+		jest.advanceTimersByTime(30); // Total 110ms from last update
+		expect(componentInstance.renderCount).toBe(2);
+		expect(container.textContent).toBe('Count: 2, Renders: 2');
+	});
+
+	it('should have updateDebounceDelay default to 0', () => {
+		let componentInstance;
+		
+		class DefaultDebounceComponent extends PicoComponent {
+			constructor(props) {
+				super(props);
+				componentInstance = this;
+			}
+			
+			render() {
+				return h('div', null, 'test');
+			}
+		}
+
+		PicoJSX.render(
+			h(DefaultDebounceComponent),
+			container
+		);
+		
+		jest.advanceTimersByTime(0); // Process componentDidMount
+
+		expect(componentInstance.updateDebounceDelay).toBe(0);
+	});
+});
+
 describe('createStore function', () => {
 	it('should initialize with an initial state and getState should return it', () => {
 		const initialState = { count: 0, name: 'PicoStore' };

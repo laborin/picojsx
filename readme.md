@@ -3,7 +3,7 @@
 
 PicoJSX is a lightweight frontend library inspired by Nano JSX, designed for creating user interfaces using JSX or direct calls to the `h` (hyperscript) function. It offers a component model with state, lifecycle methods, an optional global store with `localStorage` persistence, and automatic/manual UI update management.
 
-**Version:** 1.0.1
+**Version:** 1.1.0
 
 ## Key Features
 
@@ -19,6 +19,7 @@ PicoJSX is a lightweight frontend library inspired by Nano JSX, designed for cre
 *   **UI Updates:**
     *   By default, `setState` automatically updates the UI (`component.autoUpdate = true`).
     *   Manual updates can be opted-in (`component.autoUpdate = false; this.update()`).
+    *   Debouncing support for performance optimization (`component.updateDebounceDelay = ms`).
 *   **Focus Management:** Attempts to preserve focus and cursor position in inputs upon re-render (requires `id` on elements).
 *   **Direct DOM Manipulation:** Performs direct DOM manipulation for updates (no Virtual DOM).
 *   **`dangerouslySetInnerHTML`:** An object with a `__html` key (e.g., `{ __html: '<span>Hello</span>' }`) allows you to set raw HTML content inside an element. Use with caution as it can expose your users to cross-site scripting (XSS) attacks if the HTML source is not sanitized.
@@ -253,12 +254,13 @@ The base class for creating stateful components in PicoJSX. Extend this class to
 *   `this.props`: An object containing properties passed *to* the component (e.g., `<MyComponent title="Hi" />` makes `this.props.title` available). Treat props as immutable within the component.
 *   `this.state`: An object holding the component's internal state. Only change state using `this.setState()`.
 *   `this.autoUpdate`: A boolean (defaults to `true`). If `true`, calling `setState` automatically triggers a re-render (`this.update()`). Set it to `false` in the constructor if you want to control updates manually.
+*   `this.updateDebounceDelay`: A number (defaults to `0`). Sets the debounce delay in milliseconds for the `update()` method. When set to a value greater than 0, multiple rapid calls to `update()` will be debounced, executing only once after the specified delay. This is useful for performance optimization when dealing with frequent state changes (e.g., text input, resize events).
 
 ### Key Component Methods:
 
 *   `constructor(props)`: The place to initialize `this.state` and bind event handlers. Remember to call `super(props)` first!
 *   `setState(updater)`: Updates the component's state. `updater` can be an object with new state values to merge, or a function `(prevState, props) => newStateChanges` for updates based on previous state.
-*   `update()`: Manually triggers a re-render. You only need to call this if `this.autoUpdate` is `false`.
+*   `update()`: Manually triggers a re-render. You only need to call this if `this.autoUpdate` is `false`. If `updateDebounceDelay` is set, the update will be debounced.
 *   `render()`: **Required method.** You must implement this! It should return the JSX (or `h` calls) that defines the component's UI based on its current `props` and `state`.
 *   `componentDidMount()`: Called *after* the component is added to the DOM. Good place for setting up subscriptions, timers, or fetching initial data.
 *   `componentWillUnmount()`: Called *right before* the component is removed from the DOM. Essential for cleanup (e.g., clearing timers, removing listeners, unsubscribing).
@@ -394,6 +396,62 @@ class InputForm extends Component {
         onInput={this.handleInput}
         placeholder="Type something..."
       />
+    );
+  }
+}
+```
+
+### Debouncing Updates
+
+For performance-sensitive scenarios with frequent updates (like real-time search or resize handlers), you can use `updateDebounceDelay` to debounce the rendering:
+
+```javascript
+class SearchBox extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { query: '', results: [] };
+    // Debounce updates by 300ms
+    this.updateDebounceDelay = 300;
+  }
+
+  handleInput = (e) => {
+    const query = e.target.value;
+    // This will trigger a debounced update
+    this.setState({ query });
+    
+    // Simulate a search that would happen after debouncing
+    if (query) {
+      // In a real app, this might be an API call
+      const results = this.searchData(query);
+      this.setState({ results });
+    } else {
+      this.setState({ results: [] });
+    }
+  }
+
+  searchData(query) {
+    // Mock search function
+    const data = ['Apple', 'Banana', 'Cherry', 'Date', 'Elderberry'];
+    return data.filter(item => 
+      item.toLowerCase().includes(query.toLowerCase())
+    );
+  }
+
+  render() {
+    return (
+      <div>
+        <input
+          type="text"
+          value={this.state.query}
+          onInput={this.handleInput}
+          placeholder="Search fruits..."
+        />
+        <ul>
+          {this.state.results.map(result => 
+            <li key={result}>{result}</li>
+          )}
+        </ul>
+      </div>
     );
   }
 }
