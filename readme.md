@@ -20,7 +20,7 @@ PicoJSX is a lightweight frontend library inspired by Nano JSX, designed for cre
     *   By default, `setState` automatically updates the UI (`component.autoUpdate = true`).
     *   Manual updates can be opted-in (`component.autoUpdate = false; this.update()`).
     *   Debouncing support for performance optimization (`component.updateDebounceDelay = ms`).
-*   **Focus Management:** Attempts to preserve focus and cursor position in inputs upon re-render (requires `id` on elements).
+*   **Focus Management:** Automatically preserves focus and cursor position in inputs upon re-render.
 *   **Direct DOM Manipulation:** Performs direct DOM manipulation for updates (no Virtual DOM).
 *   **`dangerouslySetInnerHTML`:** An object with a `__html` key (e.g., `{ __html: '<span>Hello</span>' }`) allows you to set raw HTML content inside an element. Use with caution as it can expose your users to cross-site scripting (XSS) attacks if the HTML source is not sanitized.
 
@@ -376,7 +376,7 @@ class MyManualComponent extends Component {
 
 ### Focus Management
 
-PicoJSX tries its best to restore focus to an element (like an input) after the component that contains it re-renders. For this to work reliably, **the element that needs to keep focus must have a unique `id` attribute.** It also tries to restore the text selection range in inputs.
+PicoJSX automatically preserves focus and cursor position when components re-render. This works for elements with IDs (backward compatibility) and now also for elements without IDs using an intelligent path-based tracking system.
 
 ```javascript
 class InputForm extends Component {
@@ -384,13 +384,12 @@ class InputForm extends Component {
 
   handleInput = (e) => {
     this.setState({ text: e.target.value });
-    // Because the input has an id, focus should stay here after re-render
+    // Focus and cursor position are automatically preserved
   }
 
   render() {
     return (
       <input
-        id="my-form-input" // Crucial for reliable focus restoration!
         type="text"
         value={this.state.text}
         onInput={this.handleInput}
@@ -399,6 +398,13 @@ class InputForm extends Component {
     );
   }
 }
+```
+
+The focus restoration system:
+- Works with or without element IDs
+- Preserves cursor position and text selection
+- Handles nested elements and fragments
+- Only restores focus if the element type remains the same
 ```
 
 ### Debouncing Updates

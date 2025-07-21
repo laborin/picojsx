@@ -8,11 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.1.0] - 2025-07-21
 ### Added
 - Debouncing mechanism for component updates via `updateDebounceDelay` property.
+- Path-based focus restoration that works without requiring element IDs.
 - Comprehensive tests for the debouncing functionality.
+- Comprehensive tests for path-based focus restoration.
 - Documentation and examples for using the debouncing feature.
 
 ### Changed
 - The `update()` method now supports debouncing when `updateDebounceDelay` is set to a value greater than 0.
+- Focus restoration now works automatically without requiring elements to have IDs (backward compatible with ID-based approach).
 - `componentWillUnmount` now clears any pending debounced updates automatically.
 
 ## [1.0.1] - 2025-05-17
