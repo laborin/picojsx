@@ -5,6 +5,14 @@ PicoJSX is a lightweight frontend library with a minimal virtual DOM implementat
 
 **Version:** 2.0.0
 
+## Motivation
+
+I've been kind of a React detractor. well, not React itself really, but the idea of people using React for everything, even for tiny projects. The performance overhead and memory footprint is just too much for simple things. I played for a while with NanoJSX and I really liked it, it was refreshing to see something so small and simple. So I tried to make something even smaller just for fun.
+
+After using PicoJSX for a few personal and hobby projects, I realised that I actually needed a virtual DOM. Without it, I was doing too many sorcery tricks to keep the UI smooth and prevent losing focus on inputs or cursor positions. The constant destroying and rebuilding of DOM elements was becoming a nightmare to manage. So version 2.0 born with a minimal virtual DOM that solve all these problems while still keeping the library tiny (less than 800 lines of code).
+
+PicoJSX was made as an experiment, a way to learn and understand modern frameworks. Coming from an backbone/jquery user, this means something. The code has not real optimizations in place yet, I wrote it with size and simplicity in mind, and I haven't done any benchmark but I would say that its performance is good enough for production projects.
+
 ## Key Features
 
 *   **JSX Syntax:** Write your components declaratively.
@@ -318,29 +326,7 @@ class Counter extends Component {
 
 ### Focus Management
 
-PicoJSX naturally preserves focus and cursor position when components re-render thanks to the virtual DOM. Because elements are patched in-place rather than replaced, the browser maintain focus state automatically.
-
-```javascript
-class InputForm extends Component {
-  state = { text: '' };
-
-  handleInput = (e) => {
-    this.setState({ text: e.target.value });
-    // Focus and cursor position are naturally preserved
-  }
-
-  render() {
-    return (
-      <input
-        type="text"
-        value={this.state.text}
-        onInput={this.handleInput}
-        placeholder="Type something..."
-      />
-    );
-  }
-}
-```
+PicoJSX naturally preserves focus and cursor position when components re-render thanks to the virtual DOM. Because elements are patched in-place rather than replaced, the browser maintain focus state automatically. Sounds stupid, but before 2.0 I had to do a lot of trickery to have smooth UI with constant component updates destroying/rebuilding the DOM, this paragaph is here for any of the few people that downloaded 1.x in the past months, so you know the struggle is over.
 
 ### Refs
 
