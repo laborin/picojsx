@@ -2,7 +2,7 @@
  * @fileoverview PicoJSX: A lightweight frontend library inspired by Nano JSX
  * for creating user interfaces using JSX or `h` function calls.
  * Features component state, lifecycle methods, global store, and automatic/manual updates.
- * @version 1.0.1
+ * @version 1.1.0
  */
 
 /**
