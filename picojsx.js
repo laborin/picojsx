@@ -31,7 +31,7 @@ const PicoJSX = (() => {
 		// Flatten children and filter out null/undefined/boolean
 		const flatChildren = children
 			.flat(Infinity)
-			.filter(child => child != null && typeof child !== 'boolean');
+			.filter(child => child !== null && child !== undefined && typeof child !== 'boolean');
 
 		// Normalize children to VNodes
 		const normalizedChildren = flatChildren.map(child => {
@@ -96,7 +96,7 @@ const PicoJSX = (() => {
 				} else if (value && typeof value === 'object') {
 					value.current = element;
 				}
-			} else if (value === false || value == null) {
+			} else if (value === false || value === null || value === undefined) {
 				element.removeAttribute(name);
 			} else if (value === true) {
 				element.setAttribute(name, '');
@@ -180,7 +180,7 @@ const PicoJSX = (() => {
 				} else if (newValue?.current !== undefined) {
 					newValue.current = element;
 				}
-			} else if (newValue === false || newValue == null) {
+			} else if (newValue === false || newValue === null || newValue === undefined) {
 				element.removeAttribute(name);
 			} else if (newValue === true) {
 				element.setAttribute(name, '');
@@ -275,7 +275,8 @@ const PicoJSX = (() => {
 			return element;
 		}
 
-		console.warn('Unknown vnode type:', vnode);
+		// eslint-disable-next-line no-console
+	console.warn('Unknown vnode type:', vnode);
 		return document.createTextNode('');
 	}
 
@@ -474,13 +475,13 @@ const PicoJSX = (() => {
 
 		// Build key maps
 		oldChildren.forEach((child, i) => {
-			if (child?.key != null) {
+			if (child?.key !== null && child?.key !== undefined) {
 				oldKeyed[child.key] = { vnode: child, dom: oldElements[i], index: i };
 			}
 		});
 
 		newChildren.forEach((child, i) => {
-			if (child?.key != null) {
+			if (child?.key !== null && child?.key !== undefined) {
 				newKeyed[child.key] = { vnode: child, index: i };
 			}
 		});
@@ -494,7 +495,7 @@ const PicoJSX = (() => {
 			let oldDOM = null;
 			let oldIndex = -1;
 
-			if (newChild?.key != null) {
+			if (newChild?.key !== null && newChild?.key !== undefined) {
 				// Keyed child - find matching old child by key
 				const oldMatch = oldKeyed[newChild.key];
 				if (oldMatch) {
@@ -680,7 +681,8 @@ const PicoJSX = (() => {
 
 		componentDidMount() {}
 		componentWillUnmount() {}
-		componentDidUpdate(prevProps, prevState) {}
+		componentDidUpdate(prevProps, prevState) { // eslint-disable-line no-unused-vars
+	}
 	}
 
 	/**
@@ -702,6 +704,7 @@ const PicoJSX = (() => {
 					state = JSON.parse(stored);
 				}
 			} catch (e) {
+				// eslint-disable-next-line no-console
 				console.error(`PicoJSX Store: Error loading state for "${storageKey}"`, e);
 			}
 		}
@@ -720,6 +723,7 @@ const PicoJSX = (() => {
 				try {
 					localStorage.setItem(storageKey, JSON.stringify(state));
 				} catch (e) {
+					// eslint-disable-next-line no-console
 					console.error(`PicoJSX Store: Error saving state for "${storageKey}"`, e);
 				}
 			}
@@ -728,6 +732,7 @@ const PicoJSX = (() => {
 				try {
 					listener(state, oldState);
 				} catch (e) {
+					// eslint-disable-next-line no-console
 					console.error('PicoJSX Store: Error in listener', e);
 				}
 			});
