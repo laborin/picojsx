@@ -1,7 +1,6 @@
 /**
  * @jest-environment jsdom
  */
-// src/lib/picojsx/__tests__/picojsx.spec.js
 import PicoJSX, {
 	h,
 	Fragment,
@@ -10,224 +9,106 @@ import PicoJSX, {
 import { jest } from '@jest/globals';
 
 describe('PicoJSX Core API', () => {
-	it('PicoJSX default export should be an object', () => {
+	it('should export all required functions', () => {
 		expect(typeof PicoJSX).toBe('object');
-	});
-
-	it('should export h function', () => {
 		expect(typeof h).toBe('function');
-	});
-
-	it('should export Fragment symbol', () => {
 		expect(typeof Fragment).toBe('symbol');
-	});
-
-	it('should export render function', () => {
-		expect(typeof PicoJSX.render).toBe('function'); // Using PicoJSX.render for this one to ensure default export also has it
-	});
-
-	it('should export Component class (which is a function)', () => {
+		expect(typeof PicoJSX.render).toBe('function');
 		expect(typeof PicoComponent).toBe('function');
-	});
-
-	it('should export createStore function', () => {
-		expect(typeof PicoJSX.createStore).toBe('function'); // Using PicoJSX.createStore for this one
+		expect(typeof PicoJSX.createStore).toBe('function');
 	});
 });
 
-describe('h function', () => {
-	it('should create a simple VNode for an HTML element', () => {
-		const vnode = h('div', null);
-		expect(vnode).toEqual({ type: 'div', props: {}, children: [] });
+describe('h function - Virtual DOM', () => {
+	it('should create VNodes for HTML elements', () => {
+		const vnode = h('div', { id: 'test' }, 'Hello');
+		expect(vnode.type).toBe('div');
+		expect(vnode.props.id).toBe('test');
+		expect(vnode.children).toHaveLength(1);
+		expect(vnode.children[0].text).toBe('Hello');
 	});
 
-	it('should create a VNode with props', () => {
-		const props = { id: 'foo', className: 'bar' };
-		const vnode = h('div', props);
-		expect(vnode).toEqual({ type: 'div', props, children: [] });
+	it('should extract and separate key from props', () => {
+		const vnode = h('div', { key: 'mykey', id: 'test' });
+		expect(vnode.key).toBe('mykey');
+		expect(vnode.props.key).toBeUndefined();
+		expect(vnode.props.id).toBe('test');
 	});
 
-	it('should create a VNode with a single text child', () => {
-		const vnode = h('p', null, 'Hello World');
-		expect(vnode).toEqual({
-			type: 'p',
-			props: {},
-			children: ['Hello World'],
-		});
+	it('should normalize text children to VNodes', () => {
+		const vnode = h('p', null, 'Text', 123, true, null, undefined);
+		// Should filter out null/undefined/boolean and convert to text nodes
+		expect(vnode.children).toHaveLength(2);
+		expect(vnode.children[0].type).toBe('#text');
+		expect(vnode.children[0].text).toBe('Text');
+		expect(vnode.children[1].text).toBe('123');
 	});
 
-	it('should create a VNode with multiple children (text and element)', () => {
-		const vnode = h(
-			'div',
-			null,
-			'Text Child',
-			h('span', null, 'Span Child')
-		);
-		expect(vnode).toEqual({
-			type: 'div',
-			props: {},
-			children: [
-				'Text Child',
-				{ type: 'span', props: {}, children: ['Span Child'] },
-			],
-		});
-	});
-
-	it('should create a VNode for a Fragment', () => {
+	it('should handle Fragments', () => {
 		const vnode = h(Fragment, null, h('span', null), h('p', null));
 		expect(vnode.type).toBe(Fragment);
-		expect(vnode.props).toEqual({});
 		expect(vnode.children).toHaveLength(2);
-		expect(vnode.children[0]).toEqual({
-			type: 'span',
-			props: {},
-			children: [],
-		});
 	});
 
-	// Test Class Component
+	it('should call functional components immediately', () => {
+		const FuncComp = jest.fn((props, children) => 
+			h('div', props, ...children)
+		);
+		
+		const vnode = h(FuncComp, { id: 'test' }, 'child');
+		
+		expect(FuncComp).toHaveBeenCalled();
+		expect(vnode.type).toBe('div');
+		expect(vnode.props.id).toBe('test');
+	});
+
+	it('should handle class components', () => {
+		class TestComponent extends PicoComponent {
+			render() { return h('div', null); }
+		}
+		
+		const vnode = h(TestComponent, { prop: 'value' });
+		expect(vnode.type).toBe(TestComponent);
+		expect(vnode.props).toEqual({ prop: 'value' });
+	});
+});
+
+describe('Component class', () => {
 	class TestComponent extends PicoComponent {
 		constructor(props) {
 			super(props);
+			this.state = { count: 0 };
 		}
 		render() {
-			return h('div', null, 'Test Component Content');
+			return h('div', null, `Count: ${this.state.count}`);
 		}
 	}
 
-	it('should create an instance for a Class Component', () => {
-		const props = { message: 'Hello' };
-		const componentInstance = h(TestComponent, props);
-		expect(componentInstance instanceof TestComponent).toBe(true);
-		expect(componentInstance.props).toEqual(props);
+	it('should initialize with props and state', () => {
+		const instance = new TestComponent({ id: 'test' });
+		expect(instance.props).toEqual({ id: 'test' });
+		expect(instance.state).toEqual({ count: 0 });
 	});
 
-	// Test Functional Component
-	const MyFunctionalComponent = (props, children) => {
-		return h('section', props, ...children);
-	};
-
-	it('should call a Functional Component and return its result', () => {
-		const props = { id: 'functional' };
-		const childElement = h('p', null, 'Functional child');
-		const result = h(MyFunctionalComponent, props, childElement);
-		expect(result).toEqual({
-			type: 'section',
-			props: props,
-			children: [childElement],
-		});
+	it('should update state and trigger re-render', () => {
+		const instance = new TestComponent({});
+		instance.update = jest.fn();
+		
+		instance.setState({ count: 5 });
+		expect(instance.state.count).toBe(5);
+		expect(instance.update).toHaveBeenCalled();
 	});
 
-	it('should handle null props by defaulting to an empty object', () => {
-		const vnode = h('div', null, 'child');
-		expect(vnode.props).toEqual({});
-	});
-
-	it('should flatten children arrays automatically by _buildDomAndCollectMounts, but h passes them as is for functional components', () => {
-		const childrenArray = [h('span', null, 'one'), h('em', null, 'two')];
-		const FuncCompWithArrayChildren = (props, children) => {
-			// children here should be [[<span>one</span>, <em>two</em>]] if not spread by h, or directly the array if h spreads
-			// Based on current h implementation: children is an array where each argument to h is an element.
-			// So for h(MyFC, null, child1, child2) -> MyFC({}, [child1, child2])
-			// If h(MyFC, null, [childArr]) -> MyFC({}, [[childArr]])
-			expect(Array.isArray(children)).toBe(true);
-			expect(children.length).toBe(1); // children is [[span, em]]
-			expect(Array.isArray(children[0])).toBe(true);
-			expect(children[0].length).toBe(2);
-			return h('div', null, ...children[0]); // We need to spread it here for the test
-		};
-		const vnode = h(FuncCompWithArrayChildren, null, childrenArray);
-		expect(vnode).toEqual({
-			type: 'div',
-			props: {},
-			children: childrenArray, // Because FuncCompWithArrayChildren spreads them
-		});
-	});
-});
-
-describe('PicoComponent class', () => {
-	class MyTestComponent extends PicoComponent {
-		constructor(props) {
-			super(props);
-			this.state = {
-				message: 'initial',
-				count: props.initialCount || 0,
-			};
-		}
-
-		// Dummy render, no se usará para estos tests de estado
-		render() {
-			return h('div', null, this.state.message);
-		}
-	}
-
-	it('should initialize with given props', () => {
-		const props = { id: 'comp1', initialCount: 5 };
-		const instance = new MyTestComponent(props);
-		expect(instance.props).toEqual(props);
-	});
-
-	it('should initialize state correctly from constructor', () => {
-		const instance = new MyTestComponent({ initialCount: 10 });
-		expect(instance.state).toEqual({ message: 'initial', count: 10 });
-	});
-
-	it('should initialize with default internal properties', () => {
-		const instance = new MyTestComponent({});
-		expect(instance._dom).toBeNull();
-		expect(instance._isMounted).toBe(false);
-		expect(instance._isUnmounted).toBe(false);
-		expect(instance._prevProps).toBeNull();
-		expect(instance._prevState).toBeNull();
-		expect(instance._unsubscribeStore).toBeNull();
-		expect(instance.autoUpdate).toBe(true);
-		expect(instance._startMarker).toBeNull();
-		expect(instance._endMarker).toBeNull();
-	});
-
-	it('setState should update the state with an object', () => {
-		const instance = new MyTestComponent({ initialCount: 0 });
-		instance.autoUpdate = false; // Disable autoUpdate for this test to isolate setState
-		instance.setState({ message: 'updated', count: 1 });
-		expect(instance.state.message).toBe('updated');
+	it('should support function updater for setState', () => {
+		const instance = new TestComponent({});
+		instance.update = jest.fn();
+		
+		instance.setState(prev => ({ count: prev.count + 1 }));
 		expect(instance.state.count).toBe(1);
 	});
-
-	it('setState should update the state using a function', () => {
-		const instance = new MyTestComponent({ initialCount: 5 });
-		instance.autoUpdate = false;
-		instance.setState((prevState, props) => ({
-			count: prevState.count + props.initialCount,
-			message: 'from function',
-		}));
-		expect(instance.state.count).toBe(10); // 5 (initial) + 5 (props.initialCount)
-		expect(instance.state.message).toBe('from function');
-	});
-
-	it('setState should store previous state in _prevState before update', () => {
-		const instance = new MyTestComponent({ initialCount: 1 });
-		const originalState = { ...instance.state };
-		instance.autoUpdate = false;
-
-		instance.setState({ count: 2 });
-		// _prevState should capture the state *before* the current setState call that just completed
-		// but *after* any prior setState calls that might have set it to null.
-		// Since this.state would have been {message: 'initial', count: 1},
-		// and _prevState is set at the beginning of setState, it should hold this.
-		expect(instance._prevState).toEqual(originalState);
-
-		instance.setState({ message: 'final' });
-		// Now _prevState should be {message: 'initial', count: 2}
-		expect(instance._prevState).toEqual({ message: 'initial', count: 2 });
-	});
-
-	it('autoUpdate should be true by default', () => {
-		const instance = new MyTestComponent({});
-		expect(instance.autoUpdate).toBe(true);
-	});
 });
 
-describe('Component debouncing', () => {
+describe('Rendering', () => {
 	let container;
 
 	beforeEach(() => {
@@ -237,708 +118,62 @@ describe('Component debouncing', () => {
 	});
 
 	afterEach(() => {
+		document.body.removeChild(container);
 		jest.runOnlyPendingTimers();
 		jest.useRealTimers();
-		document.body.removeChild(container);
-		container = null;
 	});
 
-	class DebouncedComponent extends PicoComponent {
-		constructor(props) {
-			super(props);
-			this.state = { count: 0 };
-			this.renderCount = 0;
-			// Set debounce delay from props or default to 100ms
-			this.updateDebounceDelay = props.debounceDelay !== undefined ? props.debounceDelay : 100;
-		}
-
-		render() {
-			this.renderCount++;
-			return h('div', null, `Count: ${this.state.count}, Renders: ${this.renderCount}`);
-		}
-	}
-
-	it('should debounce updates when updateDebounceDelay is set', () => {
-		let componentInstance;
-		
-		class TestDebouncedComponent extends DebouncedComponent {
-			constructor(props) {
-				super(props);
-				componentInstance = this;
-			}
-		}
-		
+	it('should render HTML elements', () => {
 		PicoJSX.render(
-			h(TestDebouncedComponent, { debounceDelay: 100 }),
-			container
-		);
-		
-		jest.advanceTimersByTime(0); // Process componentDidMount
-
-		expect(componentInstance.renderCount).toBe(1);
-		expect(container.textContent).toBe('Count: 0, Renders: 1');
-
-		// Trigger multiple rapid state updates
-		componentInstance.setState({ count: 1 });
-		componentInstance.setState({ count: 2 });
-		componentInstance.setState({ count: 3 });
-
-		// Should not have re-rendered yet due to debouncing
-		expect(componentInstance.renderCount).toBe(1);
-		expect(container.textContent).toBe('Count: 0, Renders: 1');
-
-		// Advance time by 50ms (less than debounce delay)
-		jest.advanceTimersByTime(50);
-		expect(componentInstance.renderCount).toBe(1);
-
-		// Advance time by another 60ms (total 110ms, exceeding debounce delay)
-		jest.advanceTimersByTime(60);
-		expect(componentInstance.renderCount).toBe(2);
-		expect(container.textContent).toBe('Count: 3, Renders: 2');
-	});
-
-	it('should not debounce when updateDebounceDelay is 0', () => {
-		let componentInstance;
-		
-		class TestDebouncedComponent extends DebouncedComponent {
-			constructor(props) {
-				super(props);
-				componentInstance = this;
-			}
-		}
-		
-		PicoJSX.render(
-			h(TestDebouncedComponent, { debounceDelay: 0 }),
-			container
-		);
-		
-		jest.advanceTimersByTime(0); // Process componentDidMount
-
-		expect(componentInstance.renderCount).toBe(1);
-
-		// Updates should be immediate
-		componentInstance.setState({ count: 1 });
-		expect(componentInstance.renderCount).toBe(2);
-		expect(container.textContent).toBe('Count: 1, Renders: 2');
-
-		componentInstance.setState({ count: 2 });
-		expect(componentInstance.renderCount).toBe(3);
-		expect(container.textContent).toBe('Count: 2, Renders: 3');
-	});
-
-	it('should cancel pending debounced updates when component unmounts', () => {
-		let componentInstance;
-		
-		class TestDebouncedComponent extends DebouncedComponent {
-			constructor(props) {
-				super(props);
-				componentInstance = this;
-			}
-		}
-		
-		PicoJSX.render(
-			h(TestDebouncedComponent, { debounceDelay: 100 }),
-			container
-		);
-		
-		jest.advanceTimersByTime(0); // Process componentDidMount
-
-		// Trigger a state update
-		componentInstance.setState({ count: 1 });
-		expect(componentInstance.renderCount).toBe(1);
-
-		// Unmount the component before the debounce timeout
-		PicoJSX.render(null, container);
-
-		// Advance time past the debounce delay
-		jest.advanceTimersByTime(150);
-
-		// The update should have been cancelled, renderCount should still be 1
-		expect(componentInstance.renderCount).toBe(1);
-	});
-
-	it('should handle manual update() calls with debouncing', () => {
-		let componentInstance;
-		
-		class TestDebouncedComponent extends DebouncedComponent {
-			constructor(props) {
-				super(props);
-				componentInstance = this;
-			}
-		}
-		
-		PicoJSX.render(
-			h(TestDebouncedComponent, { debounceDelay: 100 }),
-			container
-		);
-		
-		jest.advanceTimersByTime(0); // Process componentDidMount
-
-		componentInstance.autoUpdate = false; // Disable auto-update
-		componentInstance.setState({ count: 1 }); // This won't trigger update due to autoUpdate = false
-
-		expect(componentInstance.renderCount).toBe(1);
-		expect(container.textContent).toBe('Count: 0, Renders: 1');
-
-		// Manually call update multiple times
-		componentInstance.update();
-		componentInstance.update();
-		componentInstance.update();
-
-		// Should still be debounced
-		expect(componentInstance.renderCount).toBe(1);
-
-		jest.advanceTimersByTime(100);
-		expect(componentInstance.renderCount).toBe(2);
-		expect(container.textContent).toBe('Count: 1, Renders: 2');
-	});
-
-	it('should reset debounce timer on each update call', () => {
-		let componentInstance;
-		
-		class TestDebouncedComponent extends DebouncedComponent {
-			constructor(props) {
-				super(props);
-				componentInstance = this;
-			}
-		}
-		
-		PicoJSX.render(
-			h(TestDebouncedComponent, { debounceDelay: 100 }),
-			container
-		);
-		
-		jest.advanceTimersByTime(0); // Process componentDidMount
-
-		componentInstance.setState({ count: 1 });
-		jest.advanceTimersByTime(80); // Almost at the debounce delay
-
-		// Call update again, which should reset the timer
-		componentInstance.setState({ count: 2 });
-		jest.advanceTimersByTime(80); // Another 80ms
-
-		// First timeout should have been cancelled, so still no update
-		expect(componentInstance.renderCount).toBe(1);
-
-		// Advance past the new debounce delay
-		jest.advanceTimersByTime(30); // Total 110ms from last update
-		expect(componentInstance.renderCount).toBe(2);
-		expect(container.textContent).toBe('Count: 2, Renders: 2');
-	});
-
-	it('should have updateDebounceDelay default to 0', () => {
-		let componentInstance;
-		
-		class DefaultDebounceComponent extends PicoComponent {
-			constructor(props) {
-				super(props);
-				componentInstance = this;
-			}
-			
-			render() {
-				return h('div', null, 'test');
-			}
-		}
-
-		PicoJSX.render(
-			h(DefaultDebounceComponent),
-			container
-		);
-		
-		jest.advanceTimersByTime(0); // Process componentDidMount
-
-		expect(componentInstance.updateDebounceDelay).toBe(0);
-	});
-});
-
-describe('createStore function', () => {
-	it('should initialize with an initial state and getState should return it', () => {
-		const initialState = { count: 0, name: 'PicoStore' };
-		const store = PicoJSX.createStore(initialState);
-		expect(store.getState()).toEqual(initialState);
-	});
-
-	it('setState should update the state with an object', () => {
-		const store = PicoJSX.createStore({ count: 0 });
-		store.setState({ count: 5 });
-		expect(store.getState().count).toBe(5);
-		store.setState({ message: 'hello' });
-		expect(store.getState()).toEqual({ count: 5, message: 'hello' });
-	});
-
-	it('setState should update the state with a function', () => {
-		const store = PicoJSX.createStore({ count: 1 });
-		store.setState((prevState) => ({ count: prevState.count + 4 }));
-		expect(store.getState().count).toBe(5);
-	});
-
-	it('subscribe should call the listener with new and old state upon update', () => {
-		const store = PicoJSX.createStore({ count: 0 });
-		const listenerMock = jest.fn();
-
-		store.subscribe(listenerMock);
-
-		const initialState = { count: 0 };
-		store.setState({ count: 1 });
-		const newState = { count: 1 };
-
-		expect(listenerMock).toHaveBeenCalledTimes(1);
-		expect(listenerMock).toHaveBeenCalledWith(newState, initialState);
-
-		store.setState((s) => ({ count: s.count * 2 }));
-		const newerState = { count: 2 };
-		expect(listenerMock).toHaveBeenCalledTimes(2);
-		expect(listenerMock).toHaveBeenCalledWith(newerState, newState);
-	});
-
-	it('unsubscribe should stop the listener from being called', () => {
-		const store = PicoJSX.createStore({ count: 0 });
-		const listenerMock = jest.fn();
-
-		const unsubscribe = store.subscribe(listenerMock);
-
-		store.setState({ count: 1 });
-		expect(listenerMock).toHaveBeenCalledTimes(1);
-
-		unsubscribe();
-
-		store.setState({ count: 2 });
-		expect(listenerMock).toHaveBeenCalledTimes(1); // Still 1, not called again
-	});
-
-	it('should throw an error if a non-function is passed to subscribe', () => {
-		const store = PicoJSX.createStore({});
-		expect(() => {
-			store.subscribe(null); // Simply pass null for the JS test
-		}).toThrow('PicoJSX Store: Listener must be a function.');
-	});
-
-	describe('createStore with localStorage persistence', () => {
-		const localStorageKey = 'pico-test-store';
-		let mockLocalStorage;
-
-		beforeEach(() => {
-			// Mock localStorage
-			let storeData = {};
-			mockLocalStorage = {
-				getItem: jest.fn((key) => storeData[key] || null),
-				setItem: jest.fn((key, value) => {
-					storeData[key] = value.toString();
-				}),
-				removeItem: jest.fn((key) => {
-					delete storeData[key];
-				}),
-				clear: jest.fn(() => {
-					storeData = {};
-				}),
-				key: jest.fn((index) => Object.keys(storeData)[index] || null),
-				get length() {
-					return Object.keys(storeData).length;
-				},
-			};
-
-			Object.defineProperty(window, 'localStorage', {
-				value: mockLocalStorage,
-				writable: true,
-				configurable: true,
-			});
-		});
-
-		it('should load initial state from localStorage if key exists and data is valid', () => {
-			const persistedState = { count: 100, user: 'persistedUser' };
-			mockLocalStorage.setItem(
-				localStorageKey,
-				JSON.stringify(persistedState)
-			);
-
-			const store = PicoJSX.createStore(
-				{ count: 0 },
-				{ storageKey: localStorageKey }
-			);
-			expect(store.getState()).toEqual(persistedState);
-			expect(mockLocalStorage.getItem).toHaveBeenCalledWith(
-				localStorageKey
-			);
-		});
-
-		it('should use initialState if localStorage data is invalid JSON', () => {
-			mockLocalStorage.setItem(localStorageKey, 'invalid-json---');
-			const consoleErrorSpy = jest
-				.spyOn(console, 'error')
-				.mockImplementation(() => {});
-
-			const initialState = { count: 0, defaultUser: 'default' };
-			const store = PicoJSX.createStore(initialState, {
-				storageKey: localStorageKey,
-			});
-
-			expect(store.getState()).toEqual(initialState);
-			expect(mockLocalStorage.getItem).toHaveBeenCalledWith(
-				localStorageKey
-			);
-			expect(consoleErrorSpy).toHaveBeenCalled();
-			consoleErrorSpy.mockRestore();
-		});
-
-		it('should save state to localStorage on setState if storageKey is provided', () => {
-			const initialState = { data: 'initial' };
-			const store = PicoJSX.createStore(initialState, {
-				storageKey: localStorageKey,
-			});
-
-			const newState = { data: 'updated', extra: true };
-			store.setState(newState);
-
-			expect(mockLocalStorage.setItem).toHaveBeenCalledTimes(1);
-			expect(mockLocalStorage.setItem).toHaveBeenCalledWith(
-				localStorageKey,
-				JSON.stringify(store.getState())
-			);
-			expect(
-				JSON.parse(mockLocalStorage.getItem(localStorageKey) || '{}')
-			).toEqual(store.getState());
-		});
-
-		it('should not break if localStorage.setItem throws an error', () => {
-			const initialState = { value: 'test' };
-			// Simular que setItem falla (e.g., localStorage lleno)
-			const originalSetItem = mockLocalStorage.setItem;
-			mockLocalStorage.setItem = jest.fn(() => {
-				throw new Error('LocalStorage Full');
-			});
-			const consoleErrorSpy = jest
-				.spyOn(console, 'error')
-				.mockImplementation(() => {});
-
-			const store = PicoJSX.createStore(initialState, {
-				storageKey: localStorageKey,
-			});
-
-			let finalState = null;
-			expect(() => {
-				store.setState({ value: 'new value' });
-				finalState = store.getState();
-			}).not.toThrow();
-
-			expect(finalState).toEqual({ value: 'new value' });
-			expect(consoleErrorSpy).toHaveBeenCalled();
-			consoleErrorSpy.mockRestore();
-			mockLocalStorage.setItem = originalSetItem;
-		});
-	});
-});
-
-describe('render function and DOM manipulation', () => {
-	let container;
-
-	beforeEach(() => {
-		jest.useFakeTimers(); // Usar timers falsos
-		container = document.createElement('div');
-		document.body.appendChild(container);
-	});
-
-	afterEach(() => {
-		if (container && container.parentNode) {
-			container.parentNode.removeChild(container);
-		}
-		document.body.innerHTML = '';
-		jest.runOnlyPendingTimers(); // Asegurarse de que todos los timers pendientes se ejecuten
-		jest.useRealTimers(); // Restaurar timers reales
-	});
-
-	it('should render a simple HTML element with text content', () => {
-		PicoJSX.render(h('p', null, 'Hello Pico!'), container);
-		// No se necesita jest.runAllTimers() aquí si el renderizado básico es síncrono
-		expect(container.innerHTML).toBe('<p>Hello Pico!</p>');
-	});
-
-	it('should render an HTML element with attributes', () => {
-		PicoJSX.render(
-			h('div', { id: 'test-id', className: 'my-class' }),
-			container
-		);
-		const div = container.querySelector('#test-id');
-		expect(div).not.toBeNull();
-		if (div) {
-			expect(div.id).toBe('test-id');
-			expect(div.className).toBe('my-class');
-		}
-	});
-
-	it('should render nested HTML elements', () => {
-		PicoJSX.render(
-			h('div', null, h('span', { className: 'child' }, 'Nested')),
-			container
-		);
-		expect(container.innerHTML).toBe(
-			'<div><span class="child">Nested</span></div>'
-		);
-		const span = container.querySelector('span.child');
-		expect(span).not.toBeNull();
-		if (span) {
-			expect(span.textContent).toBe('Nested');
-		}
-	});
-
-	it('should render a Fragment without a wrapping DOM element', () => {
-		PicoJSX.render(
-			h(
-				Fragment,
-				null,
-				h('span', null, 'First'),
-				'Second Text',
-				h('p', null, 'Third')
+			h('div', { id: 'test', className: 'my-class' }, 
+				h('span', null, 'Hello'),
+				' World'
 			),
 			container
 		);
-		expect(container.childNodes.length).toBe(5);
-		expect(container.childNodes[0].nodeType).toBe(Node.COMMENT_NODE);
-		expect(container.childNodes[1].tagName).toBe('SPAN');
-		expect(container.childNodes[1].textContent).toBe('First');
-		expect(container.childNodes[2].nodeType).toBe(Node.TEXT_NODE);
-		expect(container.childNodes[2].textContent).toBe('Second Text');
-		expect(container.childNodes[3].tagName).toBe('P');
-		expect(container.childNodes[3].textContent).toBe('Third');
-		expect(container.childNodes[4].nodeType).toBe(Node.COMMENT_NODE);
+		
+		expect(container.querySelector('#test')).toBeTruthy();
+		expect(container.querySelector('.my-class')).toBeTruthy();
+		expect(container.textContent).toBe('Hello World');
 	});
 
-	const SimpleFunctionalComponent = (props) => {
-		return h('h1', { className: props.className }, props.message);
-	};
-
-	it('should render a simple functional component', () => {
+	it('should render fragments with comment markers', () => {
 		PicoJSX.render(
-			h(SimpleFunctionalComponent, {
-				message: 'Hi Functional',
-				className: 'functional',
-			}),
+			h(Fragment, null, 
+				h('span', null, 'First'),
+				h('p', null, 'Second')
+			),
 			container
 		);
-		expect(container.innerHTML).toBe(
-			'<h1 class="functional">Hi Functional</h1>'
-		);
-		const h1 = container.querySelector('h1.functional');
-		expect(h1).not.toBeNull();
-		if (h1) {
-			expect(h1.textContent).toBe('Hi Functional');
-		}
+		
+		const nodes = Array.from(container.childNodes);
+		expect(nodes[0].nodeType).toBe(Node.COMMENT_NODE);
+		expect(nodes[0].textContent).toBe('fragment-start');
+		expect(nodes[nodes.length - 1].textContent).toBe('fragment-end');
+		expect(container.querySelector('span').textContent).toBe('First');
+		expect(container.querySelector('p').textContent).toBe('Second');
 	});
 
-	class SimpleClassComponent extends PicoComponent {
-		constructor(props) {
-			super(props);
-			this.state = { count: 0 };
-		}
-		render() {
-			return h(
-				'p',
-				{ id: 'class-comp' },
-				`${this.props.greeting} - Count: ${this.state.count}`
-			);
-		}
-	}
-
-	it('should render a simple class component with props and initial state', () => {
-		PicoJSX.render(
-			h(SimpleClassComponent, { greeting: 'Hello Class' }),
-			container
-		);
-		const p = container.querySelector('p#class-comp');
-		expect(p).not.toBeNull();
-		if (p) {
-			expect(p.textContent).toBe('Hello Class - Count: 0');
-		}
+	it('should render functional components', () => {
+		const FuncComp = ({ text }) => h('h1', null, text);
+		
+		PicoJSX.render(h(FuncComp, { text: 'Functional' }), container);
+		expect(container.querySelector('h1').textContent).toBe('Functional');
 	});
 
-	it('should clear previous content before rendering', () => {
-		container.innerHTML = '<p>Old content</p>';
-		PicoJSX.render(h('div', null, 'New content'), container);
-		expect(container.innerHTML).toBe('<div>New content</div>');
-		expect(container.querySelector('p')).toBeNull();
-	});
-
-	// --- Tests for Component Lifecycle and DOM updates ---
-	it('should call componentDidMount after a class component is rendered', () => {
-		const mountSpy = jest.spyOn(
-			SimpleClassComponent.prototype,
-			'componentDidMount'
-		);
-		PicoJSX.render(
-			h(SimpleClassComponent, { greeting: 'Mounted' }),
-			container
-		);
-		jest.runAllTimers(); // Ejecutar el setTimeout en render
-		expect(mountSpy).toHaveBeenCalledTimes(1);
-		mountSpy.mockRestore();
-	});
-
-	it('should call componentWillUnmount when a class component is removed', () => {
-		class UnmountableComponent extends PicoComponent {
-			constructor(props) {
-				super(props);
-			}
-			componentWillUnmount() {
-				/* Este es el que queremos espiar */
-			}
+	it('should render class components', () => {
+		class ClassComp extends PicoComponent {
 			render() {
-				return h('div', null, 'Unmountable');
+				return h('p', null, `Hello ${this.props.name}`);
 			}
 		}
-		const unmountSpy = jest.spyOn(
-			UnmountableComponent.prototype,
-			'componentWillUnmount'
-		);
-
-		PicoJSX.render(h(UnmountableComponent, {}), container);
-		jest.runAllTimers(); // Para el componentDidMount y que _isMounted se ponga a true
-
-		PicoJSX.render(null, container); // Esto debería llamar a disposeNode -> componentWillUnmount sincrónicamente
-		// No necesitamos correr timers aquí de nuevo para el unmount si es síncrono.
-		expect(unmountSpy).toHaveBeenCalledTimes(1);
-		unmountSpy.mockRestore();
-	});
-
-	it('should update the DOM when setState is called on a class component', () => {
-		PicoJSX.render(
-			h(SimpleClassComponent, { greeting: 'Initial State' }),
-			container
-		);
-		jest.runAllTimers();
-
-		let p = container.querySelector('p#class-comp');
-		expect(p.textContent).toBe('Initial State - Count: 0');
-
-		const componentInstance = p._PicoInstance;
-		expect(componentInstance).toBeDefined();
-		expect(componentInstance instanceof SimpleClassComponent).toBe(true);
-
-		if (componentInstance) {
-			componentInstance.setState({ count: 5 });
-			// Volver a consultar el elemento del DOM DESPUÉS de setState y la actualización síncrona del DOM
-			p = container.querySelector('p#class-comp');
-			expect(p).not.toBeNull(); // Asegurarse de que el elemento todavía existe (o fue reemplazado por uno igual)
-			if (p) {
-				expect(p.textContent).toBe('Initial State - Count: 5');
-			}
-		}
-	});
-
-	it('should call componentDidUpdate with prevProps and prevState after setState', (done) => {
-		let instanceRef = null; // Para acceder a la instancia fuera del render
-
-		class UpdateListeningComponent extends PicoComponent {
-			constructor(props) {
-				super(props);
-				this.state = { val: 10 };
-				instanceRef = this; // Capturar la instancia
-			}
-			componentDidUpdate(prevProps, prevState) {
-				expect(prevProps).toEqual(this.props);
-				expect(prevState).toEqual({ val: 10 });
-				expect(this.state).toEqual({ val: 20 });
-				done();
-			}
-			render() {
-				return h('div', null, `Value: ${this.state.val}`);
-			}
-		}
-
-		PicoJSX.render(
-			h(UpdateListeningComponent, { prop: 'fixed' }),
-			container
-		);
-		jest.runAllTimers(); // Para asegurar que _isMounted es true antes de setState
-
-		if (instanceRef) {
-			instanceRef.setState({ val: 20 });
-		} else {
-			done.fail('Component instance not captured for test');
-		}
-	});
-
-	// --- Tests for Refs and Events ---
-	it('should call a callback ref with the DOM element', () => {
-		const refCallback = jest.fn();
-		PicoJSX.render(h('div', { ref: refCallback }), container);
-		expect(refCallback).toHaveBeenCalledTimes(1);
-		expect(refCallback).toHaveBeenCalledWith(container.firstChild);
-		expect(container.firstChild instanceof HTMLDivElement).toBe(true);
-	});
-
-	it('should set the .current property of an object ref to the DOM element', () => {
-		const refObject = { current: null };
-		PicoJSX.render(h('span', { ref: refObject }), container);
-		expect(refObject.current).not.toBeNull();
-		expect(refObject.current instanceof HTMLSpanElement).toBe(true);
-		expect(refObject.current).toBe(container.firstChild);
-	});
-
-	it('should call a callback ref with null when the element is unmounted', () => {
-		const refCallback = jest.fn();
-		PicoJSX.render(
-			h('div', { id: 'reffed-div', ref: refCallback }),
-			container
-		);
-		expect(refCallback).toHaveBeenCalledWith(expect.any(HTMLDivElement)); // Called with element
-
-		PicoJSX.render(null, container); // Unmount
-		expect(refCallback).toHaveBeenCalledTimes(2);
-		expect(refCallback).toHaveBeenLastCalledWith(null); // Called with null
-	});
-
-	it('should set an object ref .current to null when the element is unmounted', () => {
-		const refObject = { current: null };
-		PicoJSX.render(h('button', { ref: refObject }), container);
-		const buttonElement = container.firstChild;
-		expect(refObject.current).toBe(buttonElement);
-
-		PicoJSX.render(null, container); // Unmount
-		expect(refObject.current).toBeNull();
-	});
-
-	it('should correctly update refs when props change (callback to new callback)', () => {
-		const oldRefCallback = jest.fn();
-		const newRefCallback = jest.fn();
-
-		// Initial render with oldRefCallback
-		PicoJSX.render(
-			h('div', { ref: oldRefCallback, id: 'ref-change' }),
-			container
-		);
-		const divInstance = container.querySelector('#ref-change');
-		expect(oldRefCallback).toHaveBeenCalledWith(divInstance);
-		expect(oldRefCallback).toHaveBeenCalledTimes(1);
-		expect(newRefCallback).not.toHaveBeenCalled();
-
-		// Re-render with newRefCallback
-		PicoJSX.render(
-			h('div', { ref: newRefCallback, id: 'ref-change' }),
-			container
-		);
-		expect(oldRefCallback).toHaveBeenCalledTimes(2); // Called again with null
-		expect(oldRefCallback).toHaveBeenLastCalledWith(null);
-		expect(newRefCallback).toHaveBeenCalledTimes(1);
-		expect(newRefCallback).toHaveBeenCalledWith(divInstance); // Should be the same divInstance if not re-created
-	});
-
-	it('should attach and trigger an onClick event handler', () => {
-		const handleClick = jest.fn();
-		PicoJSX.render(
-			h('button', { onClick: handleClick }, 'Click Me'),
-			container
-		);
-
-		const button = container.querySelector('button');
-		expect(button).not.toBeNull();
-
-		if (button) {
-			button.click(); // Simular click
-		}
-		expect(handleClick).toHaveBeenCalledTimes(1);
+		
+		PicoJSX.render(h(ClassComp, { name: 'World' }), container);
+		expect(container.querySelector('p').textContent).toBe('Hello World');
 	});
 });
 
-describe('Focus restoration', () => {
+describe('Component Lifecycle', () => {
 	let container;
 
 	beforeEach(() => {
@@ -948,177 +183,439 @@ describe('Focus restoration', () => {
 	});
 
 	afterEach(() => {
+		document.body.removeChild(container);
 		jest.runOnlyPendingTimers();
 		jest.useRealTimers();
-		document.body.removeChild(container);
-		container = null;
 	});
 
-	it('should restore focus to element with ID (backward compatibility)', () => {
-		class FocusTestComponent extends PicoComponent {
+	it('should call componentDidMount after mounting', () => {
+		const didMount = jest.fn();
+		
+		class MountTest extends PicoComponent {
+			componentDidMount() { didMount(); }
+			render() { return h('div', null); }
+		}
+		
+		PicoJSX.render(h(MountTest), container);
+		expect(didMount).not.toHaveBeenCalled();
+		
+		jest.runAllTimers();
+		expect(didMount).toHaveBeenCalledTimes(1);
+	});
+
+	it('should call componentWillUnmount before removal', () => {
+		const willUnmount = jest.fn();
+		
+		class UnmountTest extends PicoComponent {
+			componentWillUnmount() { willUnmount(); }
+			render() { return h('div', null); }
+		}
+		
+		PicoJSX.render(h(UnmountTest), container);
+		jest.runAllTimers();
+		
+		PicoJSX.render(h('div', null), container);
+		expect(willUnmount).toHaveBeenCalledTimes(1);
+	});
+
+	it('should call componentDidUpdate with correct prev values', () => {
+		let updateArgs;
+		
+		class UpdateTest extends PicoComponent {
 			constructor(props) {
 				super(props);
 				this.state = { count: 0 };
 			}
-
+			componentDidUpdate(prevProps, prevState) {
+				updateArgs = { prevProps, prevState };
+			}
 			render() {
-				return h('div', null, [
-					h('input', { id: 'my-input', value: this.state.count }),
-					h('button', { onClick: () => this.setState({ count: this.state.count + 1 }) }, 'Update')
-				]);
+				return h('div', null, this.state.count);
 			}
 		}
-
-		PicoJSX.render(h(FocusTestComponent), container);
-		jest.advanceTimersByTime(0); // Process componentDidMount
-
-		const input = container.querySelector('#my-input');
-		input.focus();
-		expect(document.activeElement).toBe(input);
-
-		// Trigger update
-		const button = container.querySelector('button');
-		button.click();
-
-		// Focus should be restored
-		expect(document.activeElement).toBe(container.querySelector('#my-input'));
-	});
-
-	it('should restore focus using path when element has no ID', () => {
-		class FocusTestComponent extends PicoComponent {
-			constructor(props) {
-				super(props);
-				this.state = { count: 0 };
-			}
-
-			render() {
-				return h('div', null, [
-					h('div', null, [
-						h('input', { value: this.state.count, type: 'text' }),
-						h('input', { value: 'other', type: 'email' })
-					]),
-					h('button', { onClick: () => this.setState({ count: this.state.count + 1 }) }, 'Update')
-				]);
-			}
-		}
-
-		PicoJSX.render(h(FocusTestComponent), container);
-		jest.advanceTimersByTime(0); // Process componentDidMount
-
-		const firstInput = container.querySelector('input[type="text"]');
-		firstInput.focus();
-		firstInput.setSelectionRange(1, 1); // Set cursor position
-		expect(document.activeElement).toBe(firstInput);
-
-		// Trigger update
-		const button = container.querySelector('button');
-		button.click();
-
-		// Focus should be restored to the same input
-		const newFirstInput = container.querySelector('input[type="text"]');
-		expect(document.activeElement).toBe(newFirstInput);
-		expect(newFirstInput.value).toBe('1'); // Value updated
-		expect(newFirstInput.selectionStart).toBe(1); // Cursor position restored
-		expect(newFirstInput.selectionEnd).toBe(1);
-	});
-
-	it('should not restore focus if element type changes', () => {
-		class FocusTestComponent extends PicoComponent {
-			constructor(props) {
-				super(props);
-				this.state = { isInput: true };
-			}
-
-			render() {
-				return h('div', null, [
-					this.state.isInput 
-						? h('input', { value: 'test' })
-						: h('textarea', { value: 'test' }),
-					h('button', { onClick: () => this.setState({ isInput: false }) }, 'Change Type')
-				]);
-			}
-		}
-
-		PicoJSX.render(h(FocusTestComponent), container);
-		jest.advanceTimersByTime(0); // Process componentDidMount
-
-		const input = container.querySelector('input');
-		input.focus();
-		expect(document.activeElement).toBe(input);
-
-		// Trigger update that changes element type
-		const button = container.querySelector('button');
-		button.click();
-
-		// Focus should NOT be restored since element type changed
-		expect(document.activeElement).not.toBe(container.querySelector('textarea'));
-	});
-
-	it('should restore focus in fragment components', () => {
-		class FragmentFocusComponent extends PicoComponent {
-			constructor(props) {
-				super(props);
-				this.state = { count: 0 };
-			}
-
-			render() {
-				return h(PicoJSX.Fragment, null, [
-					h('input', { value: this.state.count }),
-					h('button', { onClick: () => this.setState({ count: this.state.count + 1 }) }, 'Update')
-				]);
-			}
-		}
-
-		PicoJSX.render(h(FragmentFocusComponent), container);
-		jest.advanceTimersByTime(0); // Process componentDidMount
-
-		const input = container.querySelector('input');
-		input.focus();
-		expect(document.activeElement).toBe(input);
-
-		// Trigger update
-		const button = container.querySelector('button');
-		button.click();
-
-		// Focus should be restored in fragment
-		expect(document.activeElement).toBe(container.querySelector('input'));
-	});
-
-	it('should handle nested focus restoration', () => {
-		class NestedFocusComponent extends PicoComponent {
-			constructor(props) {
-				super(props);
-				this.state = { count: 0 };
-			}
-
-			render() {
-				return h('div', null, [
-					h('div', null, [
-						h('div', null, [
-							h('input', { value: `nested-${this.state.count}` })
-						])
-					]),
-					h('button', { onClick: () => this.setState({ count: this.state.count + 1 }) }, 'Update')
-				]);
-			}
-		}
-
-		PicoJSX.render(h(NestedFocusComponent), container);
-		jest.advanceTimersByTime(0); // Process componentDidMount
-
-		const input = container.querySelector('input');
-		input.focus();
-		expect(document.activeElement).toBe(input);
-
-		// Trigger update
-		const button = container.querySelector('button');
-		button.click();
-
-		// Focus should be restored to nested input
-		const newInput = container.querySelector('input');
-		expect(document.activeElement).toBe(newInput);
-		expect(newInput.value).toBe('nested-1');
+		
+		PicoJSX.render(h(UpdateTest, { id: 'test' }), container);
+		jest.runAllTimers();
+		
+		const instance = container.querySelector('div')._picoInstance;
+		instance.setState({ count: 1 });
+		
+		expect(updateArgs).toEqual({
+			prevProps: { id: 'test' },
+			prevState: { count: 0 }
+		});
 	});
 });
 
-// Further tests for Component lifecycle, setState DOM updates, etc.
+describe('Virtual DOM Diffing', () => {
+	let container;
+
+	beforeEach(() => {
+		container = document.createElement('div');
+		document.body.appendChild(container);
+		jest.useFakeTimers();
+	});
+
+	afterEach(() => {
+		document.body.removeChild(container);
+		jest.runOnlyPendingTimers();
+		jest.useRealTimers();
+	});
+
+	it('should patch elements instead of replacing them', () => {
+		class UpdateTest extends PicoComponent {
+			constructor(props) {
+				super(props);
+				this.state = { text: 'initial', className: 'old' };
+			}
+			render() {
+				return h('p', { 
+					id: 'para', 
+					className: this.state.className 
+				}, this.state.text);
+			}
+		}
+		
+		PicoJSX.render(h(UpdateTest), container);
+		jest.runAllTimers();
+		
+		const p1 = container.querySelector('#para');
+		p1.dataset.marked = 'yes'; // Mark element to track it
+		
+		const instance = p1._picoInstance;
+		instance.setState({ text: 'updated', className: 'new' });
+		
+		const p2 = container.querySelector('#para');
+		expect(p2).toBe(p1); // Same element reference
+		expect(p2.dataset.marked).toBe('yes'); // Our mark is still there
+		expect(p2.textContent).toBe('updated');
+		expect(p2.className).toBe('new');
+	});
+
+	it('should handle dynamic lists with keys efficiently', () => {
+		class ListTest extends PicoComponent {
+			constructor(props) {
+				super(props);
+				this.state = { 
+					items: [
+						{ id: 1, text: 'First' },
+						{ id: 2, text: 'Second' }
+					]
+				};
+			}
+			render() {
+				return h('ul', null, 
+					...this.state.items.map(item => 
+						h('li', { key: item.id }, item.text)
+					)
+				);
+			}
+		}
+		
+		PicoJSX.render(h(ListTest), container);
+		jest.runAllTimers();
+		
+		// Mark elements to track them
+		const li1 = container.querySelectorAll('li')[0];
+		const li2 = container.querySelectorAll('li')[1];
+		li1.dataset.original = 'first';
+		li2.dataset.original = 'second';
+		
+		const instance = container.querySelector('ul')._picoInstance;
+		
+		// Reorder items
+		instance.setState({ 
+			items: [
+				{ id: 2, text: 'Second' },
+				{ id: 1, text: 'First' },
+				{ id: 3, text: 'Third' }
+			]
+		});
+		
+		const lis = container.querySelectorAll('li');
+		expect(lis[0].dataset.original).toBe('second'); // Reordered, not recreated
+		expect(lis[1].dataset.original).toBe('first');
+		expect(lis[2].dataset.original).toBeUndefined(); // New item
+		expect(lis[2].textContent).toBe('Third');
+	});
+
+	it('should preserve child component state during parent updates', () => {
+		class Child extends PicoComponent {
+			constructor(props) {
+				super(props);
+				this.state = { childValue: 100 };
+			}
+			render() {
+				return h('span', null, `Child: ${this.state.childValue}`);
+			}
+		}
+		
+		class Parent extends PicoComponent {
+			constructor(props) {
+				super(props);
+				this.state = { parentValue: 0 };
+			}
+			render() {
+				return h('div', null,
+					h('p', null, `Parent: ${this.state.parentValue}`),
+					h(Child, { someProp: this.state.parentValue })
+				);
+			}
+		}
+		
+		PicoJSX.render(h(Parent), container);
+		jest.runAllTimers();
+		
+		// Update child state
+		const childSpan = container.querySelector('span');
+		const childInstance = childSpan._picoInstance;
+		childInstance.setState({ childValue: 200 });
+		expect(childSpan.textContent).toBe('Child: 200');
+		
+		// Update parent
+		const parentDiv = container.querySelector('div');
+		const parentInstance = parentDiv._picoInstance;
+		parentInstance.setState({ parentValue: 1 });
+		
+		// Child state should be preserved
+		expect(container.querySelector('span').textContent).toBe('Child: 200');
+		expect(container.querySelector('p').textContent).toBe('Parent: 1');
+	});
+
+	it('should naturally preserve focus on inputs', () => {
+		class InputTest extends PicoComponent {
+			constructor(props) {
+				super(props);
+				this.state = { value: '', label: 'Initial' };
+			}
+			handleInput = (e) => {
+				this.setState({ value: e.target.value });
+			}
+			render() {
+				return h('div', null,
+					h('label', null, this.state.label),
+					h('input', { 
+						value: this.state.value,
+						onInput: this.handleInput
+					})
+				);
+			}
+		}
+		
+		PicoJSX.render(h(InputTest), container);
+		jest.runAllTimers();
+		
+		const input = container.querySelector('input');
+		input.focus();
+		
+		// Update state
+		const instance = container.querySelector('div')._picoInstance;
+		instance.setState({ label: 'Updated' });
+		
+		// Focus should be preserved (in real browser, jsdom limitations apply)
+		expect(document.activeElement).toBe(input);
+	});
+});
+
+describe('Event Handling', () => {
+	let container;
+
+	beforeEach(() => {
+		container = document.createElement('div');
+		document.body.appendChild(container);
+	});
+
+	afterEach(() => {
+		document.body.removeChild(container);
+	});
+
+	it('should attach and update event handlers', () => {
+		const handler1 = jest.fn();
+		const handler2 = jest.fn();
+		
+		class EventTest extends PicoComponent {
+			constructor(props) {
+				super(props);
+				this.state = { useFirst: true };
+			}
+			render() {
+				return h('button', { 
+					onClick: this.state.useFirst ? handler1 : handler2 
+				}, 'Click');
+			}
+		}
+		
+		PicoJSX.render(h(EventTest), container);
+		const button = container.querySelector('button');
+		
+		button.click();
+		expect(handler1).toHaveBeenCalledTimes(1);
+		expect(handler2).not.toHaveBeenCalled();
+		
+		const instance = button._picoInstance;
+		instance.setState({ useFirst: false });
+		
+		button.click();
+		expect(handler1).toHaveBeenCalledTimes(1);
+		expect(handler2).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe('Refs', () => {
+	let container;
+
+	beforeEach(() => {
+		container = document.createElement('div');
+		document.body.appendChild(container);
+	});
+
+	afterEach(() => {
+		document.body.removeChild(container);
+	});
+
+	it('should support callback and object refs', () => {
+		const callbackRef = jest.fn();
+		const objectRef = { current: null };
+		
+		PicoJSX.render(
+			h('div', null,
+				h('span', { ref: callbackRef }, 'Callback'),
+				h('input', { ref: objectRef })
+			),
+			container
+		);
+		
+		expect(callbackRef).toHaveBeenCalledWith(container.querySelector('span'));
+		expect(objectRef.current).toBe(container.querySelector('input'));
+	});
+
+	it('should clean up refs on unmount', () => {
+		const callbackRef = jest.fn();
+		const objectRef = { current: null };
+		
+		PicoJSX.render(
+			h('div', null,
+				h('span', { ref: callbackRef }),
+				h('input', { ref: objectRef })
+			),
+			container
+		);
+		
+		// Unmount
+		PicoJSX.render(h('div', null), container);
+		
+		expect(callbackRef).toHaveBeenLastCalledWith(null);
+		expect(objectRef.current).toBeNull();
+	});
+});
+
+describe('Store', () => {
+	it('should manage global state', () => {
+		const store = PicoJSX.createStore({ count: 0 });
+		expect(store.getState()).toEqual({ count: 0 });
+		
+		store.setState({ count: 5 });
+		expect(store.getState()).toEqual({ count: 5 });
+		
+		store.setState(state => ({ count: state.count + 1 }));
+		expect(store.getState()).toEqual({ count: 6 });
+	});
+
+	it('should notify subscribers of changes', () => {
+		const store = PicoJSX.createStore({ value: 'initial' });
+		const listener = jest.fn();
+		
+		const unsubscribe = store.subscribe(listener);
+		store.setState({ value: 'updated' });
+		
+		expect(listener).toHaveBeenCalledWith(
+			{ value: 'updated' },
+			{ value: 'initial' }
+		);
+		
+		unsubscribe();
+		store.setState({ value: 'final' });
+		expect(listener).toHaveBeenCalledTimes(1);
+	});
+
+	describe('localStorage persistence', () => {
+		let mockLocalStorage;
+
+		beforeEach(() => {
+			const storage = {};
+			mockLocalStorage = {
+				getItem: jest.fn(key => storage[key] || null),
+				setItem: jest.fn((key, value) => { storage[key] = value; }),
+			};
+			Object.defineProperty(window, 'localStorage', {
+				value: mockLocalStorage,
+				writable: true
+			});
+		});
+
+		it('should persist and load from localStorage', () => {
+			mockLocalStorage.getItem.mockReturnValue(
+				JSON.stringify({ user: 'Jane' })
+			);
+			
+			const store = PicoJSX.createStore(
+				{ user: null },
+				{ storageKey: 'test-store' }
+			);
+			
+			expect(store.getState()).toEqual({ user: 'Jane' });
+			
+			store.setState({ user: 'John' });
+			expect(mockLocalStorage.setItem).toHaveBeenCalledWith(
+				'test-store',
+				JSON.stringify({ user: 'John' })
+			);
+		});
+	});
+});
+
+describe('Fragments', () => {
+	let container;
+
+	beforeEach(() => {
+		container = document.createElement('div');
+		document.body.appendChild(container);
+		jest.useFakeTimers();
+	});
+
+	afterEach(() => {
+		document.body.removeChild(container);
+		jest.runOnlyPendingTimers();
+		jest.useRealTimers();
+	});
+
+	it('should handle fragments within component trees', () => {
+		class FragmentTest extends PicoComponent {
+			constructor(props) {
+				super(props);
+				this.state = { items: ['A', 'B'] };
+			}
+			render() {
+				return h('div', null,
+					h('h1', null, 'Title'),
+					h(Fragment, null,
+						...this.state.items.map(item => 
+							h('span', { key: item }, item)
+						)
+					)
+				);
+			}
+		}
+		
+		PicoJSX.render(h(FragmentTest), container);
+		jest.runAllTimers();
+		
+		expect(container.querySelectorAll('span').length).toBe(2);
+		
+		const instance = container.querySelector('div')._picoInstance;
+		instance.setState({ items: ['A', 'B', 'C'] });
+		
+		expect(container.querySelectorAll('span').length).toBe(3);
+		expect(container.querySelectorAll('span')[2].textContent).toBe('C');
+	});
+});

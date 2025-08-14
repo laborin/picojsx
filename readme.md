@@ -1,9 +1,9 @@
 # PicoJSX: Guide and Documentation
 [![Node.js CI for PicoJSX](https://github.com/laborin/picojsx/actions/workflows/node-ci.yml/badge.svg)](https://github.com/laborin/picojsx/actions/workflows/node-ci.yml)
 
-PicoJSX is a lightweight frontend library inspired by Nano JSX, designed for creating user interfaces using JSX or direct calls to the `h` (hyperscript) function. It offers a component model with state, lifecycle methods, an optional global store with `localStorage` persistence, and automatic/manual UI update management.
+PicoJSX is a lightweight frontend library with a minimal virtual DOM implementation, designed for creating user interfaces using JSX or direct calls to the `h` (hyperscript) function. It offers a component model with state, lifecycle methods, an optional global store with `localStorage` persistence, and efficient automatic UI updates through inteligent diffing and patching.
 
-**Version:** 1.1.0
+**Version:** 2.0.0
 
 ## Key Features
 
@@ -16,12 +16,9 @@ PicoJSX is a lightweight frontend library inspired by Nano JSX, designed for cre
 *   **`className` Support:** Use `className` prop for CSS classes; it's automatically converted to the `class` attribute.
 *   **Refs:** Support for `ref` prop to get direct access to DOM elements (using callback refs or object refs).
 *   **Global Store:** Simple global state management with `localStorage` persistence.
-*   **UI Updates:**
-    *   By default, `setState` automatically updates the UI (`component.autoUpdate = true`).
-    *   Manual updates can be opted-in (`component.autoUpdate = false; this.update()`).
-    *   Debouncing support for performance optimization (`component.updateDebounceDelay = ms`).
-*   **Focus Management:** Automatically preserves focus and cursor position in inputs upon re-render.
-*   **Direct DOM Manipulation:** Performs direct DOM manipulation for updates (no Virtual DOM).
+*   **Virtual DOM:** Efficient updates through a minimal virtual DOM implementation with smart diffing.
+*   **Automatic Updates:** `setState` always trigger efficient reconciliation and patching.
+*   **Natural Focus Preservation:** Focus and cursor position are naturally preserved since elements are patched, not replaced.
 *   **`dangerouslySetInnerHTML`:** An object with a `__html` key (e.g., `{ __html: '<span>Hello</span>' }`) allows you to set raw HTML content inside an element. Use with caution as it can expose your users to cross-site scripting (XSS) attacks if the HTML source is not sanitized.
 
 ## Installation / Usage
@@ -133,7 +130,7 @@ import PicoJSX from '@laborin/picojsx';
 
 ## 1. `h(type, props, ...children)`
 
-The JSX factory function (often called a hyperscript function). It transforms JSX calls into DOM elements or component instances.
+The JSX factory function (often called a hyperscript function). It transforms JSX calls into Virtual DOM nodes (VNodes).
 
 *   `type`: Can be a `string` (HTML tag name like 'div'), a `Function` (your Component class or a functional component), or the `Fragment` symbol.
 *   `props`: An `object` (or `null`) holding attributes, event listeners (`onClick`, etc.), `style` (string or object), `ref`, `className`, `dangerouslySetInnerHTML`, and other properties.
@@ -253,14 +250,12 @@ The base class for creating stateful components in PicoJSX. Extend this class to
 
 *   `this.props`: An object containing properties passed *to* the component (e.g., `<MyComponent title="Hi" />` makes `this.props.title` available). Treat props as immutable within the component.
 *   `this.state`: An object holding the component's internal state. Only change state using `this.setState()`.
-*   `this.autoUpdate`: A boolean (defaults to `true`). If `true`, calling `setState` automatically triggers a re-render (`this.update()`). Set it to `false` in the constructor if you want to control updates manually.
-*   `this.updateDebounceDelay`: A number (defaults to `0`). Sets the debounce delay in milliseconds for the `update()` method. When set to a value greater than 0, multiple rapid calls to `update()` will be debounced, executing only once after the specified delay. This is useful for performance optimization when dealing with frequent state changes (e.g., text input, resize events).
 
 ### Key Component Methods:
 
 *   `constructor(props)`: The place to initialize `this.state` and bind event handlers. Remember to call `super(props)` first!
-*   `setState(updater)`: Updates the component's state. `updater` can be an object with new state values to merge, or a function `(prevState, props) => newStateChanges` for updates based on previous state.
-*   `update()`: Manually triggers a re-render. You only need to call this if `this.autoUpdate` is `false`. If `updateDebounceDelay` is set, the update will be debounced.
+*   `setState(updater)`: Updates the component's state. `updater` can be an object with new state values to merge, or a function `(prevState, props) => newStateChanges` for updates based on previous state. Always triggers automatic re-render through virtual DOM diffing.
+*   `update()`: Manually triggers a re-render. Usually not needed since `setState` handle this automatically.
 *   `render()`: **Required method.** You must implement this! It should return the JSX (or `h` calls) that defines the component's UI based on its current `props` and `state`.
 *   `componentDidMount()`: Called *after* the component is added to the DOM. Good place for setting up subscriptions, timers, or fetching initial data.
 *   `componentWillUnmount()`: Called *right before* the component is removed from the DOM. Essential for cleanup (e.g., clearing timers, removing listeners, unsubscribing).
@@ -277,7 +272,6 @@ class Counter extends Component {
     this.state = {
       count: 0
     };
-    // this.autoUpdate = false; // Uncomment for manual update control
 
     // Bind event handler (alternative to arrow function property)
     // this.increment = this.increment.bind(this);
@@ -306,8 +300,6 @@ class Counter extends Component {
   increment = () => {
     // Update state based on previous state
     this.setState(prevState => ({ count: prevState.count + 1 }));
-    // If autoUpdate were false, we'd need this:
-    // if (!this.autoUpdate) this.update();
   }
 
   render() {
@@ -324,59 +316,9 @@ class Counter extends Component {
 // render(<Counter />, document.getElementById('some-container'));
 ```
 
-### Controlling Automatic Rendering
-
-By default (`this.autoUpdate = true`), `setState` triggers a re-render automatically.
-```javascript
-class MyAutoComponent extends Component {
-  constructor(props) {
-    super(props);
-    this.state = { message: 'Hello' };
-    // No need to set this.autoUpdate, it's true by default
-  }
-  changeMessage = () => {
-    // This setState call will automatically cause a re-render
-    this.setState({ message: 'World' });
-  }
-  render() { return <div>{this.state.message}</div> }
-}
-```
-
-For manual control, set `this.autoUpdate = false;` in the constructor and call `this.update()` after `setState` (or whenever you want to re-render).
-```javascript
-class MyManualComponent extends Component {
-  constructor(props) {
-    super(props);
-    this.autoUpdate = false; // Take control!
-    this.state = { data: null, loading: false };
-  }
-
-  fetchData = async () => {
-    this.setState({ loading: true });
-    // We need to update NOW to show the loading state
-    this.update();
-
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    const data = { info: 'Data loaded successfully!' };
-
-    this.setState({ data: data, loading: false });
-    // And update AGAIN to show the result
-    this.update();
-  }
-
-  render() {
-    if (this.state.loading) return <p>Loading...</p>;
-    return this.state.data
-      ? <div>{this.state.data.info}</div>
-      : <button onClick={this.fetchData}>Load Data</button>;
-  }
-}
-```
-
 ### Focus Management
 
-PicoJSX automatically preserves focus and cursor position when components re-render. This works for elements with IDs (backward compatibility) and now also for elements without IDs using an intelligent path-based tracking system.
+PicoJSX naturally preserves focus and cursor position when components re-render thanks to the virtual DOM. Because elements are patched in-place rather than replaced, the browser maintain focus state automatically.
 
 ```javascript
 class InputForm extends Component {
@@ -384,7 +326,7 @@ class InputForm extends Component {
 
   handleInput = (e) => {
     this.setState({ text: e.target.value });
-    // Focus and cursor position are automatically preserved
+    // Focus and cursor position are naturally preserved
   }
 
   render() {
@@ -395,69 +337,6 @@ class InputForm extends Component {
         onInput={this.handleInput}
         placeholder="Type something..."
       />
-    );
-  }
-}
-```
-
-The focus restoration system:
-- Works with or without element IDs
-- Preserves cursor position and text selection
-- Handles nested elements and fragments
-- Only restores focus if the element type remains the same
-```
-
-### Debouncing Updates
-
-For performance-sensitive scenarios with frequent updates (like real-time search or resize handlers), you can use `updateDebounceDelay` to debounce the rendering:
-
-```javascript
-class SearchBox extends Component {
-  constructor(props) {
-    super(props);
-    this.state = { query: '', results: [] };
-    // Debounce updates by 300ms
-    this.updateDebounceDelay = 300;
-  }
-
-  handleInput = (e) => {
-    const query = e.target.value;
-    // This will trigger a debounced update
-    this.setState({ query });
-    
-    // Simulate a search that would happen after debouncing
-    if (query) {
-      // In a real app, this might be an API call
-      const results = this.searchData(query);
-      this.setState({ results });
-    } else {
-      this.setState({ results: [] });
-    }
-  }
-
-  searchData(query) {
-    // Mock search function
-    const data = ['Apple', 'Banana', 'Cherry', 'Date', 'Elderberry'];
-    return data.filter(item => 
-      item.toLowerCase().includes(query.toLowerCase())
-    );
-  }
-
-  render() {
-    return (
-      <div>
-        <input
-          type="text"
-          value={this.state.query}
-          onInput={this.handleInput}
-          placeholder="Search fruits..."
-        />
-        <ul>
-          {this.state.results.map(result => 
-            <li key={result}>{result}</li>
-          )}
-        </ul>
-      </div>
     );
   }
 }
@@ -501,7 +380,6 @@ class CallbackRefForm extends Component {
           ref={this.setTextInputRef} // Pass the callback here
           defaultValue="Focus me with callback ref!"
         />
-        {/* Button to test focusing later */} 
         <button onClick={this.focusTextInput}>Focus Input Manually</button>
       </div>
     );
@@ -715,7 +593,6 @@ Here's a slightly more involved example showing a counter, an input, dynamically
                     theme: themeStore.getState().currentTheme
                 };
                 this.themeUnsubscribe = null;
-                // this.autoUpdate = false; // Could uncomment to test manual updates
             }
 
             componentDidMount() {
@@ -725,7 +602,6 @@ Here's a slightly more involved example showing a counter, an input, dynamically
                     // Update local state when global theme changes
                     if (newState.currentTheme !== this.state.theme) {
                          this.setState({ theme: newState.currentTheme });
-                         // if (!this.autoUpdate) this.update(); // Manual update needed if disabled
                     }
                 });
             }
@@ -739,17 +615,14 @@ Here's a slightly more involved example showing a counter, an input, dynamically
             // --- Event Handlers (using arrow functions for auto-binding) ---
             increment = () => {
                 this.setState(prev => ({ count: prev.count + 1 }));
-                // if (!this.autoUpdate) this.update();
             }
 
             handleInput = (e) => {
                 this.setState({ inputValue: e.target.value });
-                // if (!this.autoUpdate) this.update();
             }
 
             toggleChild = () => {
                 this.setState(prev => ({ showChild: !prev.showChild }));
-                // if (!this.autoUpdate) this.update();
             }
 
             render() {
@@ -819,122 +692,176 @@ Here's a slightly more involved example showing a counter, an input, dynamically
 
 ---
 
-## Key Concepts: State, Rendering, and Performance
+## Known Limitations
 
-To work effectively with PicoJSX, it's helpful to understand how it handles component state and re-renders, as this differs from libraries that use a Virtual DOM, like React.
+### Fragment Root in Class Components
 
-When a parent component (or any ancestor) in PicoJSX re-renders via its `update()` method, **the internal state of its child components is generally lost and reset**. This behavior occurs because, by default, the `update()` process involves unmounting, destroying, and then reconstructing child components from scratch with their initial state. PicoJSX does not implement a Virtual DOM for complex "diffing" (comparison), nor does it have advanced mechanisms to preserve instances of components that haven't directly changed during a full re-render.
+Class components that return Fragments (`<>...</>` or `<Fragment>...</Fragment>`) as their root element cannot reliably update via `setState()` calls that occur outside the normal event flow (such as from store subscriptions, `setTimeout` callbacks, or async operations). 
 
-**Is this inefficient? Not necessarily.** This characteristic shifts the responsibility for performance optimization to the developer. PicoJSX components offer flexibility in controlling their update cycle:
+This happens because PicoJSX tracks component DOM references for updates, but Fragments are represented by comment markers rather than actual DOM elements, causing the update mechanism to fail when trying to locate and patch the component's DOM tree.
 
-*   **Automatic Updates (`this.autoUpdate = true`):** The default. It's convenient, as `setState` automatically calls `update()`. However, this can lead to state resetting in children if not managed carefully.
-*   **Manual Updates (`this.autoUpdate = false`):** This allows precise control over when a component re-renders. You decide when to call `this.update()`.
+**Workaround:** Always ensure class components have a single HTML element as their root (like `<div>` or `<section>`) rather than using Fragments at the component root level. Fragments works correctly when used inside the component tree, just not as the root element of a class component that needs to self-update.
 
-**Recommended Practices & Techniques:**
+```javascript
+// Avoid: Fragment as root in class component
+class MyComponent extends Component {
+  componentDidMount() {
+    store.subscribe(() => this.setState({ ... })); // May fail to update
+  }
+  render() {
+    return (
+      <>
+        <div>Content 1</div>
+        <div>Content 2</div>
+      </>
+    );
+  }
+}
 
-To prevent unwanted state loss in child components that manage their own significant state, and to leverage PicoJSX's strengths:
+// Good: Single element as root
+class MyComponent extends Component {
+  componentDidMount() {
+    store.subscribe(() => this.setState({ ... })); // Works reliably
+  }
+  render() {
+    return (
+      <div>
+        <div>Content 1</div>
+        <div>Content 2</div>
+      </div>
+    );
+  }
+}
 
-1.  **Selective `update()` Calls:** If using `this.autoUpdate = false`, only call `this.update()` on a parent component when its overall structure or fundamental props affecting children *must* change.
-2.  **Targeted DOM Manipulation with Refs:** This is where PicoJSX's closeness to the DOM truly shines. If a component has `this.autoUpdate = false` (or even if it's true, but you want to avoid a full re-render for a minor change), you can use `ref`s to get direct access to its underlying DOM elements. **Instead of calling `this.update()`, you can then make precise, direct manipulations to these DOM elements yourself.** For example, updating just a text content, changing a style, or adding/removing a class. This approach completely bypasses the `render()` method and the child component destruction/recreation cycle, thus preserving the state of all children. This is a powerful technique for highly optimized updates.
-3.  **Stateful Leaf Components:** Preferably, components that rely heavily on automatic updates should be "leaf components" (those without children that manage critical state) or those whose children are purely presentational.
-4.  **State Hoisting:** If multiple components need to share or persist state across parent re-renders (and targeted DOM manipulation isn't suitable), think about lifting that state up to a common ancestor component or using `PicoJSX.createStore` for global state management.
+// Also good: Fragments inside the tree
+class MyComponent extends Component {
+  render() {
+    return (
+      <div>
+        {this.state.items.map(group => (
+          <>
+            <h2>{group.title}</h2>
+            <p>{group.description}</p>
+          </>
+        ))}
+      </div>
+    );
+  }
+}
+```
 
-This behavior is a deliberate design choice in PicoJSX. It's part of the trade-off for the **exceptional speed, lightness, and direct DOM proximity** it offers. While calling `this.update()` provides a convenient way to refresh a component based on its `render` method, the ability to opt-out and use direct DOM manipulation via refs gives developers ultimate control for performance-critical sections and for preserving complex child states. This flexibility is a core strength when building fast and efficient UIs.
+## Key Concepts: Virtual DOM and Performance
+
+PicoJSX v2.0 introduces a minimal virtual DOM implementation that provides efficient updates while keeping a small footprint.
+
+### How the Virtual DOM Works
+
+When you call `setState()` or `update()`, PicoJSX:
+
+1. **Creates a Virtual Representation:** The `render()` method returns a lightweight VNode tree
+2. **Diffs Against Previous State:** Compare the new VNode tree with the previous one
+3. **Patches the DOM:** Applies only the necessary changes to the real DOM
+
+### Benefits
+
+- **Preserved Component State:** Child components maintains their state during parent updates
+- **Natural Focus Management:** Input focus and cursor position are preserved automatically
+- **Optimal Performance:** Only changed elements are updated in the DOM
+- **Smooth Updates:** No flicker or jank from replacing entire subtrees
+
+### Key-Based Reconciliation
+
+For optimal list rendering, use the `key` prop:
+
+```javascript
+class TodoList extends Component {
+  render() {
+    return (
+      <ul>
+        {this.state.todos.map(todo => 
+          <li key={todo.id}>{todo.text}</li>
+        )}
+      </ul>
+    );
+  }
+}
+```
+
+Keys help PicoJSX efficiently update lists by:
+- Identifying which items have been added, removed, or reordered
+- Preserving component instances and DOM nodes when possible
+- Minimizing unnecesary re-renders
 
 ---
 
-## Developers: Understanding PicoJSX Internals
+## Developers: Understanding PicoJSX v2 Internals
 
-This part dives a bit deeper for those curious about how PicoJSX works behind the scenes.
+This section explains how PicoJSX's virtual DOM implementation work.
 
 ### Core Rendering Pipeline
 
-How does JSX turn into stuff on the screen?
+1. **`h(type, props, ...children)` - VNode Creation:**
+   - Returns lightweight VNode objects: `{ type, props, children, key }`
+   - Normalizes children to VNodes (text becomes `{ type: '#text', text: '...' }`)
+   - Functional components are called immediately and their result is returned
+   - Extract `key` prop for efficient list reconciliation
 
-1.  **`h(type, props, ...children)` (The Hyperscript):**
-    *   This function is what your JSX actually compiles down to (thanks to the `/** @jsx ... */` pragma).
-    *   It doesn't build DOM itself. It figures out *what* you want to build.
-    *   **HTML Tag?** Returns a simple description: `{ type: 'div', props: {...}, children: [...] }`.
-    *   **Class Component?** Returns a new instance: `new MyComponent(props)`.
-    *   **Functional Component?** Calls the function: `MyFuncComp(props, children)` and passes its result along.
-    *   **Fragment?** Returns `{ type: Fragment, ... }`.
+2. **`createDOMElement(vnode)` - Initial DOM Creation:**
+   - Recursively builds DOM from VNode tree
+   - Creates text nodes, elements, or fragments
+   - Instantiates component classes and calls their `render()` method
+   - Applies props and event listeners
+   - Stores VNode references on DOM nodes for later diffing
 
-2.  **`_buildDomAndCollectMounts(input, mountQueue)` (The Builder):**
-    *   This is the workhorse that recursively takes the output from `h` (or from a component's `render` method) and turns it into actual DOM nodes.
-    *   **Simple Stuff:** Strings/numbers become text nodes. Arrays get flattened and each item is processed.
-    *   **Description Objects (`{type, props, children}`):**
-        *   `type === Fragment`: Makes a `DocumentFragment`, processes children into it.
-        *   `type === 'div'` (or other tag): Creates the element (`document.createElement`), calls `applyProps` to set attributes/listeners, and recursively calls itself for children, appending them.
-    *   **Component Instances:**
-        *   If it's the first time seeing this instance (`!instance._dom`), it calls `instance.render()` and feeds *that* output back into `_buildDomAndCollectMounts`.
-        *   The resulting DOM node (or fragment markers) gets stored on `instance._dom`.
-        *   A special property `_PicoInstance` is added to the root DOM node, pointing back to the component instance.
-        *   If the instance needs mounting (`componentDidMount` exists and not already mounted), it's added to the `mountQueue`.
-    *   Returns the final `Node` (Element, TextNode, or DocumentFragment).
+3. **`diff(parentDOM, dom, oldVNode, newVNode)` - Reconciliation:**
+   - Compares old and new VNode trees
+   - Handles node addition, removal, replacement, and updates
+   - For same types, patches existing DOM nodes
+   - For different types, replaces the entire subtree
+   - Preserves component instances when possible
 
-3.  **`render(jsxInput, parentDomElement)` (Initial Kick-off):**
-    *   This starts the whole process for the initial page load.
-    *   Clears out the `parentDomElement` first (calls `disposeNode` on existing children).
-    *   Calls `_buildDomAndCollectMounts` to build the entire DOM tree.
-    *   **Root Fragments:** If the very top level is a fragment, it cleverly inserts comment nodes (`<!-- Pico Start -->`, `<!-- Pico End -->`) into the real DOM to mark the fragment's boundaries. These markers are stored on the component instance (`_startMarker`, `_endMarker`).
-    *   Appends the final DOM structure to `parentDomElement`.
-    *   **Deferred Mounting:** Uses `setTimeout(..., 0)` to schedule calls to `componentDidMount` for all components in the `mountQueue`. This makes sure the browser has actually painted the DOM before `componentDidMount` runs.
+4. **`diffChildren()` - Smart List Updates:**
+   - Uses keys to match old and new children
+   - Reorders, adds, or removes DOM nodes as needed
+   - Falls back to index-based matching for non-keyed children
+   - Minimize DOM operations for better performance
 
-4.  **Component `update()` Method (Re-renders):**
-    *   Called by `setState` (usually) or manually.
-    *   Saves focus/selection if possible.
-    *   Calls `render()` to get the *new* desired structure.
-    *   Calls `_buildDomAndCollectMounts` to build the *new* DOM based on that structure.
-    *   **DOM Replacement Strategy:**
-        *   **Element Root:** Calls `disposeNode` on the *old* DOM tree (`oldDomContent`), then uses `parentNode.replaceChild(newDom, oldDomContent)` to swap in the new tree. Updates `this._dom`.
-        *   **Fragment Root:** Finds the `_startMarker` and `_endMarker`. Removes all nodes between them (calling `disposeNode` on them). Inserts the `newDom` (often a DocumentFragment itself) before the `_endMarker`.
-    *   Mounts any *new* child components that appeared in the render.
-    *   Calls `componentDidUpdate(prevProps, prevState)`.
-    *   Tries to restore focus.
+5. **`updateProps()` - Efficient Prop Updates:**
+   - Diffs old and new props
+   - Only updates changed attributes and event listeners
+   - Handles special props like `className`, `style`, `ref`, and `dangerouslySetInnerHTML`
 
-### Props and Attributes (`applyProps`)
+### Virtual DOM Benefits
 
-This function applies the `props` object to a real DOM `element`.
+- **Minimal Updates:** Only changed parts of the DOM are touched
+- **Preserved State:** Component instances and their state persists across updates
+- **Natural Focus:** Input elements maintain focus since they're patched, not replaced
+- **Better Performance:** Batched updates and minimal reflows
 
-*   Compares `newProps` to `oldProps`.
-*   Removes attributes/listeners present in `oldProps` but missing in `newProps`.
-*   Sets/updates attributes/listeners from `newProps`:
-    *   `className` becomes the `class` attribute.
-    *   `on*` handlers become `addEventListener` calls.
-    *   `style` objects get applied to `element.style`, `style` strings to `element.style.cssText`.
-    *   `ref` callbacks/objects are handled (calling old ref with `null`, setting `current`, etc.).
-    *   `dangerouslySetInnerHTML.__html` sets `element.innerHTML`.
-    *   Booleans set/remove attributes appropriately.
-    *   Others use `setAttribute`.
+### Component Lifecycle
 
-### Component Lifecycle Methods Timing
+- **`constructor(props)`:** Called when component is instantiated
+- **`render()`:** Returns VNode tree representing desired UI
+- **`componentDidMount()`:** Called after component is added to DOM (async)
+- **`componentDidUpdate(prevProps, prevState)`:** Called after updates are applied
+- **`componentWillUnmount()`:** Called before component is removed
 
-A quick summary of when they fire:
+### State Updates Flow
 
-*   **`constructor(props)`:** When `new MyComponent(props)` happens (usually inside `h`).
-*   **`render()`:** During initial build (`_buildDomAndCollectMounts`) and at the start of `update()`.
-*   **`componentDidMount()`:** Asynchronously (`setTimeout`) after the *initial* `PicoJSX.render()` finishes and the element is in the DOM. Also called for new children added during parent updates (synchronously within that update, after their DOM is attached).
-*   **`componentWillUnmount()`:** Called by `disposeNode` just before a component's DOM nodes are removed (during parent updates or `render` clearing).
-*   **`componentDidUpdate(prevProps, prevState)`:** Called at the *end* of the `update()` method, after DOM changes are complete. Not called on initial render.
+1. `setState()` updates component state
+2. `update()` is called automatically
+3. Component's `render()` produce new VNode tree
+4. `diff()` compares old and new VNodes
+5. Minimal DOM patches are applied
+6. `componentDidUpdate()` is called
 
-### State Management
+### Key Concepts
 
-*   **Local:** `this.state` initialized in `constructor`. `this.setState(updater)` merges updates and triggers `update()` if `this.autoUpdate` is true. `_prevState` is used for `componentDidUpdate`.
-*   **Global:** `createStore` returns `{ getState, setState, subscribe }`. `setState` notifies all subscribers. Optional `localStorage` sync via `storageKey` option.
-
-### Fragment Handling
-
-*   `<></>` or `PicoJSX.Fragment` tells `h` it's a fragment.
-*   `_buildDomAndCollectMounts` creates a `DocumentFragment` node.
-*   If a component *returns* a fragment, or the top-level render is a fragment, `render`/`update` use comment nodes (`_startMarker`, `_endMarker`) in the actual DOM to track where the fragment's content belongs.
-
-### DOM Disposal (`disposeNode`)
-
-*   Walks a DOM tree.
-*   If a node has `_PicoInstance`, calls `componentWillUnmount()` on that instance (unless it's the instance currently updating itself).
-*   Used by `render` when clearing the container and by `update` when replacing old content.
-
-Hopefully, this gives a clearer picture of PicoJSX's internals! Happy coding!
+- **VNodes:** Lightweight JavaScript objects describing the desired UI
+- **Reconciliation:** Process of comparing VNode trees to find differences
+- **Patching:** Applying minimal changes to the real DOM
+- **Keys:** Stable identities for list items to optimize reordering
 
 ---
+
 Made with ❤️ in Sonora 🌵

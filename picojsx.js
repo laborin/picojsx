@@ -1,8 +1,8 @@
 /**
- * @fileoverview PicoJSX: A lightweight frontend library inspired by Nano JSX
+ * @fileoverview PicoJSX: A lightweight frontend library with virtual DOM
  * for creating user interfaces using JSX or `h` function calls.
- * Features component state, lifecycle methods, global store, and automatic/manual updates.
- * @version 1.1.0
+ * Features component state, lifecycle methods, global store, and efficient updates.
+ * @version 2.0.0
  */
 
 /**
@@ -19,394 +19,597 @@ const PicoJSX = (() => {
 	const Fragment = Symbol('PicoFragment');
 
 	/**
-	 * Cleans up a DOM node and its children, triggering `componentWillUnmount` on component instances.
-	 * IMPORTANT: It avoids unmounting the specific instance passed in `updatingInstance`,
-	 * which prevents a component from unmounting itself during its own update.
-	 *
-	 * @param {Node} node - The DOM node to dispose of.
-	 * @param {Component|null} [updatingInstance=null] - The component instance currently performing an update,
-	 *   which should not have its own componentWillUnmount triggered by this disposal process.
+	 * Creates a virtual node (VNode) representation.
+	 * This is what the JSX transpiler calls and what components return.
+	 * 
+	 * @param {string|Function|symbol} type - Element type ('div', Component class, functional component, Fragment symbol).
+	 * @param {object|null} props - Properties/attributes.
+	 * @param {...*} children - Child elements.
+	 * @returns {object} VNode representation
 	 */
-	function disposeNode(node, updatingInstance = null) {
-		const instance = node._PicoInstance;
+	function h(type, props, ...children) {
+		// Flatten children and filter out null/undefined/boolean
+		const flatChildren = children
+			.flat(Infinity)
+			.filter(child => child != null && typeof child !== 'boolean');
 
-		if (instance && instance !== updatingInstance) {
-			if (instance._isMounted && !instance._isUnmounted) {
-				if (typeof instance.componentWillUnmount === 'function') {
-					instance.componentWillUnmount();
-				}
-				instance._isUnmounted = true; // Mark as unmounted
-				instance._isMounted = false; // Mark as not mounted
+		// Normalize children to VNodes
+		const normalizedChildren = flatChildren.map(child => {
+			if (typeof child === 'object' && child.type !== undefined) {
+				return child; // Already a VNode
 			}
+			// Convert primitives to text VNodes
+			return { type: '#text', props: null, children: [], text: String(child) };
+		});
+
+		// Extract key from props if present
+		const key = props?.key || null;
+		const restProps = props ? { ...props } : {};
+		if (restProps.key !== undefined) delete restProps.key;
+
+		// Handle functional components immediately
+		if (typeof type === 'function' && !type.isPicoClassComponent) {
+			// Call functional component and return its result
+			return type(restProps, normalizedChildren);
 		}
 
-		if (node.childNodes) {
-			Array.from(node.childNodes).forEach((child) =>
-				disposeNode(child, updatingInstance)
-			);
-		}
-
-		// Limpiar ref si existe en el nodo y no es una instancia de componente (esas se manejan arriba)
-		if (!instance && node._PicoRef) {
-			if (typeof node._PicoRef === 'function') {
-				node._PicoRef(null);
-			} else if (node._PicoRef.current) {
-				node._PicoRef.current = null;
-			}
-			delete node._PicoRef; // Eliminar la referencia para evitar memory leaks
-		}
+		// Return VNode structure
+		return {
+			type,
+			props: restProps,
+			children: normalizedChildren,
+			key
+		};
 	}
 
 	/**
 	 * Applies props (attributes, event listeners, styles, className, etc.) to a DOM element.
-	 * Updates efficiently by comparing new props to old props.
-	 * Automatically translates `className` prop to `class` attribute.
-	 *
 	 * @param {Element} element - The DOM element to apply props to.
-	 * @param {object} props - The new props object.
-	 * @param {object} [oldProps={}] - The previous props object for comparison.
+	 * @param {object} props - The props object.
 	 */
-	function applyProps(element, props, oldProps = {}) {
-		// Create copies to safely modify for className -> class translation
-		const currentProps = { ...props };
-		if (currentProps.className !== undefined) {
-			// Handle className -> class
-			currentProps.class = currentProps.className;
-			delete currentProps.className;
-		}
+	function applyProps(element, props) {
+		if (!props) return;
 
-		const previousProps = { ...oldProps };
-		if (previousProps.className !== undefined) {
-			// Also transform old props for correct comparison
-			previousProps.class = previousProps.className;
-			delete previousProps.className;
-		}
+		for (let name in props) {
+			const value = props[name];
 
-		// Remove attributes/event listeners from previousProps that are not in currentProps
-		for (let name in previousProps) {
-			// Ignore special props and only remove if not present in current props
-			if (
-				name !== 'children' &&
-				name !== 'key' &&
-				name !== '_PicoInstance' &&
-				!(name in currentProps)
-			) {
-				if (
-					name.startsWith('on') &&
-					typeof previousProps[name] === 'function'
-				) {
-					element.removeEventListener(
-						name.substring(2).toLowerCase(),
-						previousProps[name]
-					);
+			if (name === 'children' || name === 'key') continue;
+
+			if (name === 'className') {
+				element.className = value || '';
+			} else if (name.startsWith('on') && typeof value === 'function') {
+				const eventName = name.substring(2).toLowerCase();
+				element.addEventListener(eventName, value);
+			} else if (name === 'dangerouslySetInnerHTML') {
+				if (value?.__html !== undefined) {
+					element.innerHTML = value.__html;
+				}
+			} else if (name === 'style') {
+				if (typeof value === 'string') {
+					element.style.cssText = value;
+				} else if (typeof value === 'object') {
+					Object.assign(element.style, value);
+				}
+			} else if (name === 'ref') {
+				if (typeof value === 'function') {
+					value(element);
+				} else if (value && typeof value === 'object') {
+					value.current = element;
+				}
+			} else if (value === false || value == null) {
+				element.removeAttribute(name);
+			} else if (value === true) {
+				element.setAttribute(name, '');
+			} else {
+				element.setAttribute(name, String(value));
+			}
+		}
+	}
+
+	/**
+	 * Updates props on an existing DOM element by diffing old and new props.
+	 * @param {Element} element - The DOM element to update.
+	 * @param {object} oldProps - Previous props.
+	 * @param {object} newProps - New props.
+	 */
+	function updateProps(element, oldProps, newProps) {
+		oldProps = oldProps || {};
+		newProps = newProps || {};
+
+		// Remove old props not in new props
+		for (let name in oldProps) {
+			if (!(name in newProps)) {
+				if (name === 'className') {
+					element.className = '';
+				} else if (name.startsWith('on') && typeof oldProps[name] === 'function') {
+					const eventName = name.substring(2).toLowerCase();
+					element.removeEventListener(eventName, oldProps[name]);
 				} else if (name === 'ref') {
-					// Clean up old ref
-					if (typeof previousProps[name] === 'function')
-						previousProps[name](null);
-					else if (previousProps[name]?.current)
-						previousProps[name].current = null;
-					// También limpiar _PicoRef si este ref se está eliminando explícitamente por props
-					if (element._PicoRef === previousProps[name]) {
-						delete element._PicoRef;
+					if (typeof oldProps[name] === 'function') {
+						oldProps[name](null);
+					} else if (oldProps[name]?.current !== undefined) {
+						oldProps[name].current = null;
 					}
-				} else {
-					element.removeAttribute(name); // Handles standard attributes like 'id', 'value', etc. and also 'class' if needed.
+				} else if (name !== 'children' && name !== 'key' && name !== 'dangerouslySetInnerHTML') {
+					element.removeAttribute(name);
 				}
 			}
 		}
 
-		// Set/update attributes/event listeners from currentProps
-		for (let name in currentProps) {
-			// Skip special props ('className' was already handled)
-			if (
-				name === 'children' ||
-				name === 'key' ||
-				name === '_PicoInstance'
-			)
-				continue;
+		// Update changed props
+		for (let name in newProps) {
+			if (name === 'children' || name === 'key') continue;
 
-			const value = currentProps[name];
-			const oldValue = previousProps[name]; // Compare with the transformed previousProps value
+			const oldValue = oldProps[name];
+			const newValue = newProps[name];
 
-			// Optimization: only update if value changed, but always update ref
-			if (value === oldValue && name !== 'ref') continue;
+			if (oldValue === newValue && name !== 'ref') continue;
 
-			if (name.startsWith('on') && typeof value === 'function') {
-				// Event listener
+			if (name === 'className') {
+				if (element.className !== newValue) {
+					element.className = newValue || '';
+				}
+			} else if (name.startsWith('on')) {
 				const eventName = name.substring(2).toLowerCase();
-				if (typeof oldValue === 'function')
+				if (typeof oldValue === 'function') {
 					element.removeEventListener(eventName, oldValue);
-				element.addEventListener(eventName, value);
+				}
+				if (typeof newValue === 'function') {
+					element.addEventListener(eventName, newValue);
+				}
 			} else if (name === 'dangerouslySetInnerHTML') {
-				// Handle raw HTML insertion
-				if (
-					value?.__html !== undefined &&
-					value.__html !== oldValue?.__html
-				)
-					element.innerHTML = value.__html;
-				else if (!value && oldValue?.__html !== undefined)
-					element.innerHTML = '';
+				if (newValue?.__html !== oldValue?.__html) {
+					element.innerHTML = newValue?.__html || '';
+				}
 			} else if (name === 'style') {
-				// Style prop can be string or object
-				if (typeof value === 'string') {
-					if (element.style.cssText !== value)
-						element.style.cssText = value;
-				} else if (typeof value === 'object') {
-					if (typeof oldValue !== 'object')
-						element.style.cssText = ''; // Clear if changing from string/undefined
-					for (const styleName in oldValue) {
-						if (!(styleName in value))
-							element.style[styleName] = '';
-					}
-					for (const styleName in value) {
-						if (element.style[styleName] !== value[styleName])
-							element.style[styleName] = value[styleName];
-					}
-				} else if (oldValue) {
-					// Clear style if new value is null/undefined
+				if (typeof newValue === 'string') {
+					element.style.cssText = newValue;
+				} else if (typeof newValue === 'object') {
+					element.style.cssText = '';
+					Object.assign(element.style, newValue);
+				} else {
 					element.style.cssText = '';
 				}
 			} else if (name === 'ref') {
-				// Handle refs (callback or object refs)
-				if (oldValue && oldValue !== value) {
-					// Cleanup old ref before setting new one
+				if (oldValue && oldValue !== newValue) {
 					if (typeof oldValue === 'function') oldValue(null);
-					else if (oldValue?.current) oldValue.current = null;
-					// Si el ref antiguo almacenado en el elemento es este, ya no es válido.
-					if (element._PicoRef === oldValue) delete element._PicoRef;
+					else if (oldValue?.current !== undefined) oldValue.current = null;
 				}
-				if (typeof value === 'function') {
-					value(element);
-					element._PicoRef = value;
-				} else if (value?.current !== undefined) {
-					value.current = element;
-					element._PicoRef = value;
-				} else if (name === 'ref' && !value && element._PicoRef) {
-					// Si la nueva prop ref es explícitamente null/undefined, limpiar la guardada
-					if (typeof element._PicoRef === 'function') {
-						element._PicoRef(null);
-					} else if (element._PicoRef.current) {
-						element._PicoRef.current = null;
-					}
-					delete element._PicoRef;
+				if (typeof newValue === 'function') {
+					newValue(element);
+				} else if (newValue?.current !== undefined) {
+					newValue.current = element;
 				}
-			} else if (
-				value === undefined ||
-				value === null ||
-				value === false
-			) {
-				// Remove attribute for falsey values (but not 0)
-				if (element.hasAttribute(name)) element.removeAttribute(name);
+			} else if (newValue === false || newValue == null) {
+				element.removeAttribute(name);
+			} else if (newValue === true) {
+				element.setAttribute(name, '');
 			} else {
-				// Standard attribute (handles 'class' as well if passed directly)
-				const attrValue = value === true ? '' : String(value);
-				if (element.getAttribute(name) !== attrValue) {
-					element.setAttribute(name, attrValue);
+				if (element.getAttribute(name) !== String(newValue)) {
+					element.setAttribute(name, String(newValue));
 				}
 			}
 		}
 	}
 
 	/**
-	 * Recursively builds DOM nodes from renderable input (JSX output, components, strings, etc.).
-	 * Also collects component instances that need their `componentDidMount` called.
-	 *
-	 * @param {*} input - The renderable input (from h() or component.render()).
-	 * @param {Array<Component>} mountQueue - Array to push component instances into for later mounting.
-	 * @returns {Node} The created DOM node (Element, TextNode, or DocumentFragment).
-	 * @protected
+	 * Creates a DOM element from a VNode.
+	 * @param {object} vnode - Virtual node to create DOM from.
+	 * @returns {Node} The created DOM node.
 	 */
-	function _buildDomAndCollectMounts(input, mountQueue) {
-		// Handle simple cases: null, boolean, string, number
-		if (input === null || input === undefined || typeof input === 'boolean')
-			return document.createTextNode('');
-		if (typeof input === 'string' || typeof input === 'number')
-			return document.createTextNode(String(input));
+	function createDOMElement(vnode) {
+		if (!vnode) return document.createTextNode('');
 
-		if (Array.isArray(input)) {
-			// If input is an array (e.g., children), process each item
+		// Handle text nodes
+		if (vnode.type === '#text') {
+			return document.createTextNode(vnode.text || '');
+		}
+
+		// Handle fragments
+		if (vnode.type === Fragment) {
 			const fragment = document.createDocumentFragment();
-			input
-				.flat()
-				.forEach((child) =>
-					fragment.appendChild(
-						_buildDomAndCollectMounts(child, mountQueue)
-					)
-				);
+			
+			// Add start marker
+			const startMarker = document.createComment('fragment-start');
+			fragment.appendChild(startMarker);
+			vnode._startMarker = startMarker;
+			
+			// Add children
+			vnode.children.forEach(child => {
+				fragment.appendChild(createDOMElement(child));
+			});
+			
+			// Add end marker
+			const endMarker = document.createComment('fragment-end');
+			fragment.appendChild(endMarker);
+			vnode._endMarker = endMarker;
+			
 			return fragment;
 		}
 
-		// Handle Component Instance
-		if (input?.constructor?.isPicoClassComponent) {
-			const instance = input;
-			// If _dom is not set, this is the first render pass for this instance.
-			// Call its render() method and recursively build the DOM for that output.
-			if (!instance._dom) {
-				const renderOutput = instance.render();
-				instance._dom = _buildDomAndCollectMounts(
-					renderOutput,
-					mountQueue
-				);
-				// Tag the instance's root DOM node(s) with a reference to the instance
-				if (instance._dom instanceof Node) {
-					instance._dom._PicoInstance = instance;
-				}
+		// Handle class components
+		if (vnode.type?.isPicoClassComponent) {
+			const instance = vnode._instance || new vnode.type(vnode.props);
+			vnode._instance = instance;
+			instance._vnode = vnode;
+			
+			const childVNode = instance.render();
+			instance._childVNode = childVNode;
+			
+			const dom = createDOMElement(childVNode);
+			instance._dom = dom;
+			
+			// Store instance reference on DOM
+			if (dom instanceof Element) {
+				dom._picoInstance = instance;
 			}
-			// Queue for mounting if needed
-			if (!instance._isMounted && !instance._isUnmounted) {
-				if (
-					typeof instance.componentDidMount === 'function' &&
-					!mountQueue.includes(instance)
-				) {
-					mountQueue.push(instance);
-				}
+			
+			// Queue for componentDidMount
+			if (!instance._isMounted && typeof instance.componentDidMount === 'function') {
+				setTimeout(() => {
+					if (!instance._isUnmounted) {
+						instance.componentDidMount();
+						instance._isMounted = true;
+					}
+				}, 0);
 			}
-			return instance._dom; // Return the DOM associated with the instance
+			
+			return dom;
 		}
 
-		// Handle object structure from h() for elements/fragments, or functional component results
-		if (typeof input === 'object' && input !== null) {
-			// If it's already a DOM Node (e.g., from dangerouslySetInnerHTML or external source)
-			if (input instanceof Node) return input; // Just return it as is
-
-			// Assume { type, props, children } structure from h()
-			const { type, props, children } = input;
-
-			if (type === Fragment) {
-				// Handle Fragment: process children into a DocumentFragment
-				const fragment = document.createDocumentFragment();
-				(children || [])
-					.flat()
-					.forEach((child) =>
-						fragment.appendChild(
-							_buildDomAndCollectMounts(child, mountQueue)
-						)
-					);
-				return fragment;
-			}
-
-			if (typeof type === 'string') {
-				// Standard HTML element
-				const element = document.createElement(type);
-				if (props) applyProps(element, props); // Apply props
-				// Build and append children
-				(children || [])
-					.flat()
-					.forEach((child) =>
-						element.appendChild(
-							_buildDomAndCollectMounts(child, mountQueue)
-						)
-					);
-				return element;
-			}
+		// Handle HTML elements
+		if (typeof vnode.type === 'string') {
+			const element = document.createElement(vnode.type);
+			
+			// Apply props
+			applyProps(element, vnode.props);
+			
+			// Append children
+			vnode.children.forEach(child => {
+				element.appendChild(createDOMElement(child));
+			});
+			
+			// Store vnode reference
+			element._vnode = vnode;
+			
+			return element;
 		}
 
-		// Warn if we encounter an input type we don't know how to handle
-		// eslint-disable-next-line no-console
-		console.warn('PicoJSX: Cannot build DOM for unexpected type:', input);
-		return document.createTextNode(
-			`[Err: Unknown input type ${typeof input}]`
-		);
+		console.warn('Unknown vnode type:', vnode);
+		return document.createTextNode('');
 	}
 
 	/**
-	 * The hyperscript function (or JSX factory). This is what Babel/transpilers call.
-	 * It transforms `h('div', { id: 'foo' }, ...)` or `<div id="foo">...</div>` calls.
-	 *
-	 * - For HTML tags ('div', 'span', etc.): Returns a simple object `{ type, props, children }`.
-	 * - For PicoJSX Class Components: Returns `new ComponentClass(props)`.
-	 * - For Functional Components: Calls the function `FuncComp(props, children)` and returns its result.
-	 * - For Fragment: Returns `{ type: Fragment, props, children }`.
-	 *
-	 * Note: Does NOT create DOM nodes directly. That's `_buildDomAndCollectMounts`'s job.
-	 *
-	 * @param {string|Function|symbol} type - Element type ('div', Component class, functional component, Fragment symbol).
-	 * @param {object|null} props - Properties/attributes.
-	 * @param {...*} children - Child elements.
-	 * @returns {Component|object|*} The component instance, a descriptive object for `_buildDomAndCollectMounts`, or functional component output.
+	 * Diffs two VNodes and patches the DOM accordingly.
+	 * @param {Node} parentDOM - Parent DOM node.
+	 * @param {Node} dom - Current DOM node.
+	 * @param {object} oldVNode - Previous VNode.
+	 * @param {object} newVNode - New VNode.
+	 * @param {number} index - Child index in parent.
+	 * @returns {Node} The updated or replaced DOM node.
 	 */
-	function h(type, props, ...children) {
-		props = props || {};
-		// Children are passed as an array to functional components if needed.
-		// `_buildDomAndCollectMounts` will handle flattening if it processes an array of children later.
-		// Example: `h(MyFuncComp, { title: 'Hi' }, child1, child2)` calls `MyFuncComp({ title: 'Hi' }, [child1, child2])`
-
-		if (typeof type === 'function') {
-			if (type.isPicoClassComponent) {
-				// Class Component: return a new instance.
-				// `_buildDomAndCollectMounts` will later call `instance.render()`.
-				return new type(props);
+	function diff(parentDOM, dom, oldVNode, newVNode, index = 0) {
+		// Handle null/undefined cases
+		if (!newVNode && !oldVNode) return null;
+		
+		// Remove node
+		if (!newVNode && oldVNode) {
+			if (dom) {
+				unmountComponent(dom);
+				parentDOM.removeChild(dom);
+			}
+			return null;
+		}
+		
+		// Add new node
+		if (newVNode && !oldVNode) {
+			const newDOM = createDOMElement(newVNode);
+			if (parentDOM.childNodes[index]) {
+				parentDOM.insertBefore(newDOM, parentDOM.childNodes[index]);
 			} else {
-				// Functional Component: execute it right away.
-				// Its output (renderable stuff) will be processed by `_buildDomAndCollectMounts`.
-				return type(props, children); // Pass children as the second argument (array)
+				parentDOM.appendChild(newDOM);
+			}
+			return newDOM;
+		}
+
+		// Different types - replace
+		if (oldVNode.type !== newVNode.type) {
+			const newDOM = createDOMElement(newVNode);
+			unmountComponent(dom);
+			parentDOM.replaceChild(newDOM, dom);
+			return newDOM;
+		}
+
+		// Same type - update
+		
+		// Text nodes
+		if (newVNode.type === '#text') {
+			if (oldVNode.text !== newVNode.text) {
+				dom.textContent = newVNode.text;
+			}
+			return dom;
+		}
+
+		// Fragments
+		if (newVNode.type === Fragment) {
+			// For fragments, dom should be the start marker if it exists
+			let startMarker = null;
+			let endMarker = null;
+			
+			// Check if dom is actually the start marker
+			if (dom && dom.nodeType === 8 && dom.textContent === 'fragment-start') {
+				startMarker = dom;
+				
+				// Find corresponding end marker
+				let node = startMarker.nextSibling;
+				while (node) {
+					if (node.nodeType === 8 && node.textContent === 'fragment-end') {
+						endMarker = node;
+						break;
+					}
+					node = node.nextSibling;
+				}
+			}
+			
+			if (startMarker && endMarker) {
+				// Fragment exists, diff children between markers
+				const oldChildren = oldVNode.children || [];
+				const newChildren = newVNode.children || [];
+				
+				// Collect existing nodes between markers
+				const existingNodes = [];
+				let node = startMarker.nextSibling;
+				while (node && node !== endMarker) {
+					existingNodes.push(node);
+					node = node.nextSibling;
+				}
+				
+				// Diff each child
+				const maxLength = Math.max(oldChildren.length, newChildren.length);
+				let currentNode = startMarker.nextSibling;
+				
+				for (let i = 0; i < maxLength; i++) {
+					const oldChild = oldChildren[i];
+					const newChild = newChildren[i];
+					
+					if (!newChild && oldChild) {
+						// Remove old child
+						if (currentNode && currentNode !== endMarker) {
+							const next = currentNode.nextSibling;
+							unmountComponent(currentNode);
+							parentDOM.removeChild(currentNode);
+							currentNode = next;
+						}
+					} else if (newChild && !oldChild) {
+						// Add new child
+						const newDOM = createDOMElement(newChild);
+						parentDOM.insertBefore(newDOM, endMarker);
+					} else if (newChild && oldChild) {
+						// Update existing child
+						if (currentNode && currentNode !== endMarker) {
+							const next = currentNode.nextSibling;
+							diff(parentDOM, currentNode, oldChild, newChild, Array.from(parentDOM.childNodes).indexOf(currentNode));
+							currentNode = next;
+						}
+					}
+				}
+				
+				// Store markers for next update
+				newVNode._startMarker = startMarker;
+				newVNode._endMarker = endMarker;
+				
+				return startMarker; // Return start marker as reference
+			} else {
+				// No existing fragment, create new one
+				const newDOM = createDOMElement(newVNode);
+				if (dom) {
+					unmountComponent(dom);
+					parentDOM.replaceChild(newDOM, dom);
+				} else {
+					parentDOM.appendChild(newDOM);
+				}
+				return newVNode._startMarker;
 			}
 		}
-		// For standard HTML elements and Fragments, return the descriptive object.
-		return { type, props, children };
+
+		// Class components
+		if (newVNode.type?.isPicoClassComponent) {
+			const instance = oldVNode._instance;
+			newVNode._instance = instance;
+			
+			// Update props
+			const prevProps = instance.props;
+			const prevState = instance.state;
+			instance.props = newVNode.props;
+			instance._vnode = newVNode;
+			
+			// Re-render
+			const oldChildVNode = instance._childVNode;
+			const newChildVNode = instance.render();
+			instance._childVNode = newChildVNode;
+			
+			// Recursively diff children
+			const newDOM = diff(dom.parentNode, dom, oldChildVNode, newChildVNode, Array.from(dom.parentNode.childNodes).indexOf(dom));
+			
+			// If the child is a fragment, we need to update the DOM reference
+			if (newChildVNode && newChildVNode.type === Fragment && newDOM !== dom) {
+				return newDOM;
+			}
+			
+			// Call componentDidUpdate
+			if (typeof instance.componentDidUpdate === 'function') {
+				instance.componentDidUpdate(prevProps, prevState);
+			}
+			
+			return dom;
+		}
+
+		// HTML elements
+		if (typeof newVNode.type === 'string') {
+			// Update props
+			updateProps(dom, oldVNode.props, newVNode.props);
+			
+			// Update children with keys support
+			diffChildren(dom, oldVNode.children, newVNode.children);
+			
+			// Update stored vnode
+			dom._vnode = newVNode;
+			
+			return dom;
+		}
+
+		return dom;
 	}
 
 	/**
-	 * Calculates the path from a root element to a target element.
-	 * @param {Node} root - The root element to start from
-	 * @param {Node} target - The target element to find the path to
-	 * @returns {number[]|null} Array of child indices representing the path, or null if not found
+	 * Diffs and updates children with key support.
+	 * @param {Element} parentDOM - Parent DOM element.
+	 * @param {Array} oldChildren - Old child VNodes.
+	 * @param {Array} newChildren - New child VNodes.
 	 */
-	function calculateElementPath(root, target) {
-		if (!root || !target || root === target) return null;
-		
-		const path = [];
-		let current = target;
-		
-		// Walk up from target to root, building path in reverse
-		while (current && current.parentNode && current !== root) {
-			const parent = current.parentNode;
-			// Skip text nodes when counting siblings
-			const children = Array.from(parent.childNodes).filter(
-				node => node.nodeType === Node.ELEMENT_NODE || node === current
-			);
-			const index = children.indexOf(current);
-			if (index === -1) return null; // Target not found in parent's children
-			path.unshift(index);
-			current = parent;
-		}
-		
-		// Verify we reached the root
-		if (current !== root && current.parentNode !== root) return null;
-		
-		// If current.parentNode === root, add the final index
-		if (current.parentNode === root) {
-			const children = Array.from(root.childNodes).filter(
-				node => node.nodeType === Node.ELEMENT_NODE
-			);
-			const index = children.indexOf(current);
-			if (index === -1) return null;
-			path.unshift(index);
-		}
-		
-		return path;
+	function diffChildren(parentDOM, oldChildren = [], newChildren = []) {
+		const oldKeyed = {};
+		const newKeyed = {};
+		const oldElements = Array.from(parentDOM.childNodes);
+
+		// Build key maps
+		oldChildren.forEach((child, i) => {
+			if (child?.key != null) {
+				oldKeyed[child.key] = { vnode: child, dom: oldElements[i], index: i };
+			}
+		});
+
+		newChildren.forEach((child, i) => {
+			if (child?.key != null) {
+				newKeyed[child.key] = { vnode: child, index: i };
+			}
+		});
+
+		// Track which old children have been matched
+		const matched = new Set();
+
+		// Process new children
+		newChildren.forEach((newChild, newIndex) => {
+			let oldChild = null;
+			let oldDOM = null;
+			let oldIndex = -1;
+
+			if (newChild?.key != null) {
+				// Keyed child - find matching old child by key
+				const oldMatch = oldKeyed[newChild.key];
+				if (oldMatch) {
+					oldChild = oldMatch.vnode;
+					oldDOM = oldMatch.dom;
+					oldIndex = oldMatch.index;
+					matched.add(oldIndex);
+				}
+			} else {
+				// Non-keyed - find first unmatched old child of same type at same position
+				if (newIndex < oldChildren.length && !matched.has(newIndex)) {
+					const candidate = oldChildren[newIndex];
+					if (!candidate?.key && candidate?.type === newChild?.type) {
+						oldChild = candidate;
+						oldDOM = oldElements[newIndex];
+						oldIndex = newIndex;
+						matched.add(oldIndex);
+					}
+				}
+			}
+
+			// Diff the child
+			const resultDOM = diff(parentDOM, oldDOM, oldChild, newChild, newIndex);
+
+			// Move if necessary
+			if (resultDOM && resultDOM !== parentDOM.childNodes[newIndex]) {
+				if (parentDOM.childNodes[newIndex]) {
+					parentDOM.insertBefore(resultDOM, parentDOM.childNodes[newIndex]);
+				} else {
+					parentDOM.appendChild(resultDOM);
+				}
+			}
+		});
+
+		// Remove unmatched old children
+		oldChildren.forEach((oldChild, i) => {
+			if (!matched.has(i) && oldElements[i]) {
+				unmountComponent(oldElements[i]);
+				if (oldElements[i].parentNode === parentDOM) {
+					parentDOM.removeChild(oldElements[i]);
+				}
+			}
+		});
 	}
 
 	/**
-	 * Traverses a path from root element to find the target element.
-	 * @param {Node} root - The root element to start from
-	 * @param {number[]} path - Array of child indices to follow
-	 * @returns {Element|null} The element at the path, or null if not found
+	 * Unmounts a component and its children.
+	 * @param {Node} dom - DOM node to unmount.
 	 */
-	function traverseElementPath(root, path) {
-		if (!root || !path || path.length === 0) return null;
-		
-		let current = root;
-		for (const index of path) {
-			// Get only element children (skip text nodes)
-			const children = Array.from(current.childNodes).filter(
-				node => node.nodeType === Node.ELEMENT_NODE
-			);
-			if (index >= children.length) return null;
-			current = children[index];
+	function unmountComponent(dom) {
+		if (!dom) return;
+
+		// Handle fragment markers - if this is a fragment start marker, remove everything until end marker
+		if (dom.nodeType === 8 && dom.textContent === 'fragment-start') {
+			const parent = dom.parentNode;
+			if (parent) {
+				let node = dom.nextSibling;
+				const nodesToRemove = [dom];
+				
+				// Collect all nodes until end marker
+				while (node) {
+					nodesToRemove.push(node);
+					if (node.nodeType === 8 && node.textContent === 'fragment-end') {
+						break;
+					}
+					node = node.nextSibling;
+				}
+				
+				// Remove all collected nodes
+				nodesToRemove.forEach(n => {
+					if (n && n.parentNode) {
+						// Unmount children first
+						if (n.childNodes) {
+							n.childNodes.forEach(child => unmountComponent(child));
+						}
+						// Handle component instances
+						if (n._picoInstance) {
+							const instance = n._picoInstance;
+							if (!instance._isUnmounted && typeof instance.componentWillUnmount === 'function') {
+								instance.componentWillUnmount();
+							}
+							instance._isUnmounted = true;
+							instance._isMounted = false;
+						}
+						n.parentNode.removeChild(n);
+					}
+				});
+				return;
+			}
 		}
-		
-		return current;
+
+		// Handle component instances
+		if (dom._picoInstance) {
+			const instance = dom._picoInstance;
+			if (!instance._isUnmounted && typeof instance.componentWillUnmount === 'function') {
+				instance.componentWillUnmount();
+			}
+			instance._isUnmounted = true;
+			instance._isMounted = false;
+		}
+
+		// Recursively unmount children
+		if (dom.childNodes) {
+			dom.childNodes.forEach(child => unmountComponent(child));
+		}
+
+		// Clean up refs
+		const vnode = dom._vnode;
+		if (vnode?.props?.ref) {
+			if (typeof vnode.props.ref === 'function') {
+				vnode.props.ref(null);
+			} else if (vnode.props.ref?.current !== undefined) {
+				vnode.props.ref.current = null;
+			}
+		}
 	}
 
 	/**
@@ -415,463 +618,69 @@ const PicoJSX = (() => {
 	 * @class Component
 	 */
 	class Component {
-		/**
-		 * Static flag to identify PicoJSX class components.
-		 * @static
-		 * @type {boolean}
-		 */
 		static isPicoClassComponent = true;
 
-		/**
-		 * Creates a component instance.
-		 * @param {object} [props={}] - The properties passed to the component.
-		 * @memberof Component
-		 */
 		constructor(props) {
-			/** @type {object} Properties passed to the component. */
 			this.props = props || {};
-			/** @type {object} The component's internal state. */
-			this.state = this.state || {};
-			/** @protected @type {Node|null} Reference to the root DOM node or DocumentFragment rendered. */
+			this.state = {};
+			this._vnode = null;
+			this._childVNode = null;
 			this._dom = null;
-			/**
-			 * @protected @type {boolean} Lifecycle state: True after componentDidMount runs (or is scheduled).
-			 * Together with _isUnmounted, represents 3 states:
-			 * - (false, false): Initial, before mounting.
-			 * - (true, false): Mounted.
-			 * - (false, true): Unmounted.
-			 */
 			this._isMounted = false;
-			/** @protected @type {boolean} Lifecycle state: True after componentWillUnmount runs. See _isMounted. */
 			this._isUnmounted = false;
-			/** @protected @type {object|null} Stores previous props for `componentDidUpdate`. */
-			this._prevProps = null;
-			/** @protected @type {object|null} Stores previous state for `componentDidUpdate`. */
 			this._prevState = null;
-			/** @protected @type {Function|null} Stores the unsubscribe function from `store.subscribe`. */
-			this._unsubscribeStore = null;
-			/** @type {boolean} If true, `setState` automatically calls `update()`. Default is `true`. */
-			this.autoUpdate = true;
-			/** @protected @type {Comment|null} Start marker for fragment roots. */
-			this._startMarker = null;
-			/** @protected @type {Comment|null} End marker for fragment roots. */
-			this._endMarker = null;
-			/** @type {number} Debounce delay in milliseconds for the update() method. Set to 0 to disable debouncing. Default is 0. */
-			this.updateDebounceDelay = 0;
-			/** @protected @type {number|null} Timeout ID for the debounced update. */
-			this._updateDebounceTimeout = null;
 		}
 
-		/**
-		 * Updates the component's state and potentially triggers a UI update based on `autoUpdate`.
-		 * @param {object|Function} updater - An object to merge with state, or a function `(prevState, props) => newStateChanges`.
-		 * @memberof Component
-		 */
 		setState(updater) {
-			this._prevState = { ...this.state }; // Always snapshot the current state before this update
+			// Save previous state before updating
+			this._prevState = { ...this.state };
+			
 			if (typeof updater === 'function') {
 				Object.assign(this.state, updater(this.state, this.props));
 			} else {
 				Object.assign(this.state, updater);
 			}
-			if (this.autoUpdate) {
-				this.update(); // Trigger re-render if autoUpdate is on
-			}
+			
+			this.update();
 		}
 
-		/**
-		 * Manually triggers a re-render of the component. Handles focus preservation and updates for
-		 * both single-element roots and fragment roots (using markers).
-		 * If updateDebounceDelay is set, the update will be debounced.
-		 * @memberof Component
-		 */
 		update() {
-			// If debouncing is enabled, clear any existing timeout and set a new one
-			if (this.updateDebounceDelay > 0) {
-				if (this._updateDebounceTimeout !== null) {
-					clearTimeout(this._updateDebounceTimeout);
-				}
-				this._updateDebounceTimeout = setTimeout(() => {
-					this._updateDebounceTimeout = null;
-					this._performUpdate();
-				}, this.updateDebounceDelay);
-			} else {
-				// No debouncing, update immediately
-				this._performUpdate();
-			}
-		}
+			if (!this._dom || this._isUnmounted) return;
 
-		/**
-		 * Internal method that performs the actual update.
-		 * @protected
-		 * @memberof Component
-		 */
-		_performUpdate() {
-			// Don't update if not mounted, already unmounted, or has no DOM representation
-			if (
-				!this._isMounted ||
-				this._isUnmounted ||
-				(!this._dom && !this._startMarker)
-			) {
-				if (this._isUnmounted)
-					// eslint-disable-next-line no-console
-					console.warn(
-						'PicoJSX: update() called on an explicitly unmounted component.',
-						this
-					);
-				else if (!this._dom && !this._startMarker)
-					// eslint-disable-next-line no-console
-					console.warn(
-						'PicoJSX: update() called on component with no DOM or markers.',
-						this
-					);
-				else if (!this._isMounted)
-					// eslint-disable-next-line no-console
-					console.warn(
-						'PicoJSX: update() called on component not marked as mounted.',
-						this
-					);
-				return;
-			}
+			const prevProps = { ...this.props };
+			// Use saved prevState from setState, or current state if called directly
+			const prevState = this._prevState || { ...this.state };
+			// Clear saved prevState after using it
+			this._prevState = null;
 
-			let parentNode = null;
-			const isFragmentRoot = !!(this._startMarker && this._endMarker);
+			// Re-render and diff
+			const oldChildVNode = this._childVNode;
+			const newChildVNode = this.render();
+			this._childVNode = newChildVNode;
 
-			if (isFragmentRoot) {
-				// Ensure markers are not null before accessing parentNode
-				if (this._startMarker && this._endMarker) {
-					parentNode = this._startMarker.parentNode;
-					if (
-						!parentNode ||
-						parentNode !== this._endMarker.parentNode
-					) {
-						// eslint-disable-next-line no-console
-						console.warn(
-							'PicoJSX: Markers detached or have different parents during update. Aborting update.',
-							this
-						);
-						return;
-					}
-				} else {
-					// This case should ideally not be reached if isFragmentRoot is true
-					// eslint-disable-next-line no-console
-					console.warn(
-						'PicoJSX: Inconsistent fragment markers state during update.',
-						this
-					);
-					return;
-				}
-			} else if (this._dom?.parentNode) {
-				parentNode = this._dom.parentNode;
-			}
+			// Find where we are in parent
+			const parentDOM = this._dom.parentNode;
+			if (!parentDOM) return;
 
-			if (!parentNode) {
-				// eslint-disable-next-line no-console
-				console.warn(
-					'PicoJSX: update() called on detached component.',
-					this
-				);
-				return;
-			}
+			const index = Array.from(parentDOM.childNodes).indexOf(this._dom);
+			
+			// Diff and patch
+			const newDOM = diff(parentDOM, this._dom, oldChildVNode, newChildVNode, index);
+			this._dom = newDOM;
 
-			this._prevProps = { ...this.props };
-			const prevStateForUpdate = this._prevState || this.state;
-			const oldDomContent = this._dom;
-			const oldStartMarker = this._startMarker; // Could be null
-			const oldEndMarker = this._endMarker;
-
-			let focusedElementId = null;
-			let focusedElementPath = null;
-			let focusedElementInfo = null;
-			let selectionStart = null;
-			let selectionEnd = null;
-			const activeElement = document.activeElement;
-			// Attempt to preserve focus within the component's boundary
-			if (activeElement) {
-				let isInBoundary = false;
-				let rootForPath = null;
-				
-				if (isFragmentRoot) {
-					// Check if focused element is between the markers
-					isInBoundary =
-						activeElement !== this._startMarker &&
-						activeElement !== this._endMarker &&
-						this._startMarker.compareDocumentPosition(
-							activeElement
-						) & Node.DOCUMENT_POSITION_FOLLOWING &&
-						this._endMarker.compareDocumentPosition(activeElement) &
-							Node.DOCUMENT_POSITION_PRECEDING;
-					if (isInBoundary) {
-						// For fragments, we need to use the parent node as root
-						rootForPath = parentNode;
-					}
-				} else if (this._dom?.contains(activeElement)) {
-					// Check if focused element is within the component's root DOM node
-					isInBoundary = true;
-					rootForPath = this._dom;
-				}
-				
-				if (isInBoundary) {
-					// First try to use ID if available (backward compatibility)
-					if (activeElement.id) {
-						focusedElementId = activeElement.id;
-					} else {
-						// Calculate path-based location
-						if (isFragmentRoot) {
-							// For fragments, we need to find the index of the focused element
-							// among the elements between the markers
-							const fragmentElements = [];
-							let current = this._startMarker.nextSibling;
-							while (current && current !== this._endMarker) {
-								if (current.nodeType === Node.ELEMENT_NODE) {
-									fragmentElements.push(current);
-								}
-								current = current.nextSibling;
-							}
-							
-							// Check if activeElement is one of the fragment elements or contained within them
-							for (let i = 0; i < fragmentElements.length; i++) {
-								const elem = fragmentElements[i];
-								if (elem === activeElement) {
-									focusedElementPath = ['fragment', i];
-									break;
-								} else if (elem.contains(activeElement)) {
-									const subPath = calculateElementPath(elem, activeElement);
-									if (subPath) {
-										focusedElementPath = ['fragment', i, ...subPath];
-									}
-									break;
-								}
-							}
-						} else {
-							focusedElementPath = calculateElementPath(rootForPath, activeElement);
-						}
-						
-						if (focusedElementPath) {
-							// Store additional info to verify we're restoring to the same type of element
-							focusedElementInfo = {
-								tagName: activeElement.tagName,
-								type: activeElement.type || null,
-								className: activeElement.className || null
-							};
-						}
-					}
-					
-					// Try to save cursor position too, if applicable
-					if (typeof activeElement.selectionStart === 'number') {
-						selectionStart = activeElement.selectionStart;
-						selectionEnd = activeElement.selectionEnd;
-					}
-				}
-			}
-
-			// Render the new DOM structure
-			const childrenMountQueue = [];
-			const newRenderOutput = this.render();
-			const newDom = _buildDomAndCollectMounts(
-				newRenderOutput,
-				childrenMountQueue
-			);
-
-			if (isFragmentRoot) {
-				// Update for fragment root: remove old nodes between markers, insert new ones
-				let currentNode = oldStartMarker.nextSibling;
-				while (currentNode && currentNode !== oldEndMarker) {
-					const next = currentNode.nextSibling;
-					disposeNode(currentNode, this); // Clean up components within
-					parentNode.removeChild(currentNode);
-					currentNode = next;
-				}
-				parentNode.insertBefore(newDom, oldEndMarker);
-				// Keep _dom as a reference, maybe useful later? But markers are key.
-				this._dom =
-					newDom instanceof DocumentFragment
-						? newDom
-						: document.createDocumentFragment();
-				if (!(newDom instanceof DocumentFragment) && newDom)
-					this._dom.appendChild(newDom);
-			} else {
-				// Update for single element root: replace the old DOM node with the new one
-				if (oldDomContent) disposeNode(oldDomContent, this); // Clean up old content
-				parentNode.replaceChild(newDom, oldDomContent);
-				this._dom = newDom;
-				this._startMarker = null;
-				this._endMarker = null;
-			}
-
-			// Re-tag the new root DOM node if it's an element
-			if (this._dom instanceof Element) {
-				this._dom._PicoInstance = this;
-			}
-
-			// Process any new child components that need mounting
-			const uniqueChildrenMountQueue = [...new Set(childrenMountQueue)];
-			uniqueChildrenMountQueue.forEach((comp) => {
-				let isConnected = false;
-				if (comp._startMarker && comp._endMarker) {
-					// Check fragment markers are connected
-					isConnected =
-						comp._startMarker.parentNode === parentNode &&
-						comp._endMarker.parentNode === parentNode;
-				} else if (comp._dom instanceof Node) {
-					// Check standard DOM node is connected
-					isConnected = comp._dom.isConnected;
-				}
-
-				if (isConnected && !comp._isMounted && !comp._isUnmounted) {
-					// Call didMount and update flags if connected
-					if (typeof comp.componentDidMount === 'function') {
-						try {
-							comp.componentDidMount();
-						} catch (e) {
-							// eslint-disable-next-line no-console
-							console.error(
-								`PicoJSX: Error in componentDidMount of ${comp.constructor.name}`,
-								e
-							);
-						}
-						comp._isMounted = true;
-						comp._isUnmounted = false;
-					}
-				}
-			});
-
-			// Call componentDidUpdate lifecycle method
+			// Lifecycle
 			if (typeof this.componentDidUpdate === 'function') {
-				this.componentDidUpdate(this._prevProps, prevStateForUpdate);
+				this.componentDidUpdate(prevProps, prevState);
 			}
-
-			// Attempt to restore focus
-			let elementToFocus = null;
-			
-			if (focusedElementId) {
-				// ID-based restoration (backward compatibility)
-				let searchContext = isFragmentRoot ? parentNode : this._dom;
-				if (searchContext) {
-					if (isFragmentRoot) {
-						// Search between markers for the element by ID
-						let current = this._startMarker.nextSibling;
-						while (current && current !== this._endMarker) {
-							if (current.nodeType === Node.ELEMENT_NODE) {
-								if (current.id === focusedElementId) {
-									elementToFocus = current;
-									break;
-								}
-								// Check descendants too
-								if (
-									typeof current.querySelector === 'function'
-								) {
-									elementToFocus = current.querySelector(
-										`#${focusedElementId}`
-									);
-									if (elementToFocus) break;
-								}
-							}
-							current = current.nextSibling;
-						}
-					} else if (
-						this._dom?.id === focusedElementId &&
-						typeof this._dom.focus === 'function'
-					) {
-						// Check if the root element itself is the one
-						elementToFocus = this._dom;
-					} else if (typeof this._dom?.querySelector === 'function') {
-						// Search within the root element
-						elementToFocus = this._dom.querySelector(
-							`#${focusedElementId}`
-						);
-					}
-				}
-			} else if (focusedElementPath && focusedElementInfo) {
-				// Path-based restoration (new approach)
-				if (isFragmentRoot && focusedElementPath[0] === 'fragment') {
-					// For fragments, find elements between the markers
-					const fragmentElements = [];
-					let current = this._startMarker.nextSibling;
-					while (current && current !== this._endMarker) {
-						if (current.nodeType === Node.ELEMENT_NODE) {
-							fragmentElements.push(current);
-						}
-						current = current.nextSibling;
-					}
-					
-					// Get the element at the saved index
-					const index = focusedElementPath[1];
-					if (index < fragmentElements.length) {
-						const rootElem = fragmentElements[index];
-						
-						// If there's a sub-path, traverse from this root
-						if (focusedElementPath.length > 2) {
-							const subPath = focusedElementPath.slice(2);
-							const candidate = traverseElementPath(rootElem, subPath);
-							if (candidate && 
-								candidate.tagName === focusedElementInfo.tagName &&
-								(candidate.type || null) === focusedElementInfo.type) {
-								elementToFocus = candidate;
-							}
-						} else {
-							// The root element itself was focused
-							if (rootElem && 
-								rootElem.tagName === focusedElementInfo.tagName &&
-								(rootElem.type || null) === focusedElementInfo.type) {
-								elementToFocus = rootElem;
-							}
-						}
-					}
-				} else {
-					// For regular components
-					const rootForPath = this._dom;
-					if (rootForPath) {
-						const candidate = traverseElementPath(rootForPath, focusedElementPath);
-						// Verify it's the same type of element
-						if (candidate && 
-							candidate.tagName === focusedElementInfo.tagName &&
-							(candidate.type || null) === focusedElementInfo.type) {
-							elementToFocus = candidate;
-						}
-					}
-				}
-			}
-			
-			if (elementToFocus) {
-				try {
-					elementToFocus.focus();
-					// Restore cursor position if saved
-					if (
-						selectionStart !== null &&
-						typeof elementToFocus.setSelectionRange ===
-							'function'
-					) {
-						elementToFocus.setSelectionRange(
-							selectionStart,
-							selectionEnd
-						);
-					}
-				} catch (e) {
-					// eslint-disable-next-line no-console
-					console.warn(
-						`PicoJSX: Failed focus/selection restore`,
-						e
-					);
-				}
-			}
-			this._prevState = null; // Clear saved previous state
 		}
 
-		/** @abstract @returns {*} */
 		render() {
-			throw new Error('PicoJSX: Component has no render method.');
+			throw new Error('Component must implement render() method');
 		}
+
 		componentDidMount() {}
-		componentWillUnmount() {
-			// Clear any pending debounced update when component is unmounting
-			if (this._updateDebounceTimeout !== null) {
-				clearTimeout(this._updateDebounceTimeout);
-				this._updateDebounceTimeout = null;
-			}
-		}
-		/** @param {object} prevProps @param {object} prevState */
-		componentDidUpdate(prevProps, prevState) {} // eslint-disable-line no-unused-vars
+		componentWillUnmount() {}
+		componentDidUpdate(prevProps, prevState) {}
 	}
 
 	/**
@@ -887,198 +696,84 @@ const PicoJSX = (() => {
 		const listeners = new Set();
 
 		if (storageKey) {
-			// Try loading initial state from localStorage if key provided
 			try {
 				const stored = localStorage.getItem(storageKey);
 				if (stored !== null) {
 					state = JSON.parse(stored);
 				}
 			} catch (e) {
-				// eslint-disable-next-line no-console
-				console.error(
-					`PicoJSX Store: Error loading state for "${storageKey}"`,
-					e
-				);
+				console.error(`PicoJSX Store: Error loading state for "${storageKey}"`, e);
 			}
 		}
 
-		/** Get the current state. @returns {*} */
 		function getState() {
 			return state;
 		}
 
-		/**
-		 * Update the store's state, persist if needed, and notify listeners.
-		 * @param {object|Function} updater - Object to merge or function `(currentState) => newState`.
-		 */
 		function setState(updater) {
 			const oldState = state;
-			state =
-				typeof updater === 'function'
-					? updater(state)
-					: { ...state, ...updater };
+			state = typeof updater === 'function' 
+				? updater(state) 
+				: { ...state, ...updater };
+			
 			if (storageKey) {
-				// Persist to localStorage if key exists
 				try {
 					localStorage.setItem(storageKey, JSON.stringify(state));
 				} catch (e) {
-					// eslint-disable-next-line no-console
-					console.error(
-						`PicoJSX Store: Error saving state for "${storageKey}"`,
-						e
-					);
+					console.error(`PicoJSX Store: Error saving state for "${storageKey}"`, e);
 				}
 			}
-			// Notify all listeners
-			listeners.forEach((listener) => {
+			
+			listeners.forEach(listener => {
 				try {
 					listener(state, oldState);
 				} catch (e) {
-					// eslint-disable-next-line no-console
-					console.error(
-						`PicoJSX Store: Error in listener for "${storageKey || 'default'}"`,
-						e
-					);
+					console.error('PicoJSX Store: Error in listener', e);
 				}
 			});
 		}
 
-		/**
-		 * Subscribe a listener function to state changes.
-		 * @param {Function} listener - Function to call with `(newState, oldState)`.
-		 * @returns {Function} An unsubscribe function.
-		 */
 		function subscribe(listener) {
-			if (typeof listener !== 'function')
-				throw new Error('PicoJSX Store: Listener must be a function.');
+			if (typeof listener !== 'function') {
+				throw new Error('Listener must be a function');
+			}
 			listeners.add(listener);
 			return () => listeners.delete(listener);
 		}
-		return { getState, setState, subscribe }; // The store's public API
+
+		return { getState, setState, subscribe };
 	}
 
 	/**
-	 * Renders JSX / Component output into a target DOM element.
-	 * Clears existing content, builds the new DOM, handles root fragments with markers,
-	 * and schedules `componentDidMount` calls.
-	 * @param {*} jsxInput - Renderable input (JSX object from transpiler, Component class/instance, primitive).
-	 * @param {Element} parentDomElement - Container element.
+	 * Renders VNode tree into a target DOM element.
+	 * @param {*} vnode - VNode tree or component to render.
+	 * @param {Element} container - Container element.
 	 */
-	function render(jsxInput, parentDomElement) {
-		if (!(parentDomElement instanceof HTMLElement)) {
-			// Or throw a more specific error if only HTMLElements are truly supported for all operations
-			// eslint-disable-next-line no-console
-			console.warn(
-				'PicoJSX: parentDomElement is not an HTMLElement. Some operations might be limited.'
-			);
+	function render(vnode, container) {
+		if (!container || !(container instanceof Element)) {
+			throw new Error('Container must be a DOM element');
 		}
 
-		if (!parentDomElement || !(parentDomElement instanceof Element)) {
-			throw new Error(
-				'PicoJSX: Target parent DOM element is missing or invalid.'
-			);
-		}
-		Array.from(parentDomElement.childNodes).forEach((node) =>
-			disposeNode(node)
-		);
-		parentDomElement.innerHTML = ''; // Clear previous content
-
-		const mountQueue = [];
-		const domToAppend = _buildDomAndCollectMounts(jsxInput, mountQueue);
-
-		let topLevelInstance = null;
-		let startMarker = null; // For root fragments
-		let endMarker = null; // For root fragments
-		let isRootFragment = false;
-
-		if (jsxInput?.constructor?.isPicoClassComponent) {
-			topLevelInstance = jsxInput;
-			if (topLevelInstance._dom instanceof DocumentFragment) {
-				isRootFragment = true; // Component's render() returned a fragment
-			}
-		} else if (domToAppend instanceof DocumentFragment) {
-			isRootFragment = true; // Top-level input resolved to a fragment (e.g., <></>)
+		// Clear and unmount existing content
+		while (container.firstChild) {
+			unmountComponent(container.firstChild);
+			container.removeChild(container.firstChild);
 		}
 
-		if (isRootFragment) {
-			// Use comment markers to delineate the fragment's content in the parent
-			startMarker = document.createComment(
-				`Pico Start: ${topLevelInstance?.constructor?.name || 'RootFragment'}`
-			);
-			endMarker = document.createComment(
-				`Pico End: ${topLevelInstance?.constructor?.name || 'RootFragment'}`
-			);
-			parentDomElement.appendChild(startMarker);
-			if (domToAppend) parentDomElement.appendChild(domToAppend);
-			parentDomElement.appendChild(endMarker);
-			if (topLevelInstance) {
-				topLevelInstance._startMarker = startMarker;
-				topLevelInstance._endMarker = endMarker;
-				// Note: topLevelInstance._dom might be the fragment itself or cleared depending on flow
-			}
-		} else {
-			if (domToAppend) parentDomElement.appendChild(domToAppend);
-			if (topLevelInstance) {
-				// Ensure markers are null if the root wasn't a fragment
-				topLevelInstance._startMarker = null;
-				topLevelInstance._endMarker = null;
-			}
+		// Create root VNode if needed
+		if (typeof vnode === 'function' && vnode.isPicoClassComponent) {
+			vnode = h(vnode, {});
+		} else if (typeof vnode === 'string' || typeof vnode === 'number') {
+			vnode = { type: '#text', props: null, children: [], text: String(vnode) };
 		}
 
-		// Remove duplicate components from mount queue (can happen with nesting)
-		const uniqueMountQueue = [...new Set(mountQueue)];
-
-		// Defer componentDidMount calls until after the current JS execution block completes
-		// This ensures the DOM is fully attached and rendered by the browser.
-		setTimeout(() => {
-			uniqueMountQueue.forEach((componentInstance) => {
-				if (
-					!componentInstance._isMounted &&
-					!componentInstance._isUnmounted
-				) {
-					let isConnected = false;
-					if (
-						componentInstance._startMarker &&
-						componentInstance._endMarker
-					) {
-						// Check fragment markers are connected
-						isConnected =
-							componentInstance._startMarker.parentNode ===
-								parentDomElement &&
-							componentInstance._endMarker.parentNode ===
-								parentDomElement;
-					} else if (componentInstance._dom instanceof Node) {
-						// Check standard DOM node is connected
-						isConnected = componentInstance._dom.isConnected;
-					}
-
-					if (isConnected) {
-						// Call didMount and update flags if connected
-						if (
-							typeof componentInstance.componentDidMount ===
-							'function'
-						) {
-							try {
-								componentInstance.componentDidMount();
-							} catch (e) {
-								// eslint-disable-next-line no-console
-								console.error(
-									`PicoJSX: Error in componentDidMount of ${componentInstance.constructor?.name || 'UnknownComponent'}`,
-									e
-								);
-							}
-							componentInstance._isMounted = true;
-							componentInstance._isUnmounted = false;
-						} else {
-							// eslint-disable-next-line no-console
-							console.warn(
-								`PicoJSX Render (Deferred): Skipping mount call for non-connected ${componentInstance.constructor?.name || 'UnknownComponent'}.`
-							);
-						}
-					}
-				}
-			});
-		}, 0);
+		// Create and append DOM
+		const dom = createDOMElement(vnode);
+		container.appendChild(dom);
+		
+		// Store for future updates
+		container._vnode = vnode;
+		container._rootDOM = dom;
 	}
 
 	return {

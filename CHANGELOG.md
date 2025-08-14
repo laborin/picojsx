@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2025-01-14
+### Added
+- Super simple virtual DOM implementation
+- Smart diffing algorithm
+- Minimal DOM patching
+- Support for keyed lists to optimize re-renders
+
+### Changed
+- **BREAKING**: MAjor rewrite using virtual DOM architecture
+- **BREAKING**: `h()` now returns lightweight VNodes instead of DOM elements or component instances
+- **BREAKING**: Component updates now use reconciliation instead of full replacement
+- **BREAKING**: Simplified Component class - removed `autoUpdate` property (always automatic now )
+- Improved performance with surgical DOM updates
+- Natural focus preservation without complex tracking
+
+### Removed
+- **BREAKING**: Removed `autoUpdate` property from Component class
+- **BREAKING**: Removed `updateDebounceDelay` and debouncing mechanism
+- **BREAKING**: Removed complex focus preservation code
+- **BREAKING**: Removed fragment markers system
+- **BREAKING**: Removed direct DOM manipulation in favor of virtual DOM
+
 ## [1.1.0] - 2025-07-21
 ### Added
 - Debouncing mechanism for component updates via `updateDebounceDelay` property.
