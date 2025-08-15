@@ -2,7 +2,7 @@
  * @fileoverview PicoJSX: A lightweight frontend library with virtual DOM
  * for creating user interfaces using JSX or `h` function calls.
  * Features component state, lifecycle methods, global store, and efficient updates.
- * @version 2.0.2
+ * @version 2.0.3
  */
 
 /**
@@ -322,7 +322,25 @@ const PicoJSX = (() => {
 		// Different types - replace
 		if (oldVNode.type !== newVNode.type) {
 			const newDOM = createDOMElement(newVNode);
-			unmountComponent(dom);
+			
+			// Unmount only child components in the subtree, not the parent component's DOM element
+			const unmountChildren = (node) => {
+				if (node && node.childNodes) {
+					node.childNodes.forEach(child => {
+						unmountChildren(child);
+						if (child._picoInstance) {
+							if (!child._picoInstance._isUnmounted && typeof child._picoInstance.componentWillUnmount === 'function') {
+								child._picoInstance.componentWillUnmount();
+							}
+							child._picoInstance._isUnmounted = true;
+							child._picoInstance._isMounted = false;
+						}
+					});
+				}
+			};
+			
+			unmountChildren(dom);
+			
 			parentDOM.replaceChild(newDOM, dom);
 			return newDOM;
 		}
