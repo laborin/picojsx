@@ -1,6 +1,6 @@
 {
   "name": "@laborin/picojsx",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "PicoJSX: A lightweight frontend library inspired by Nano JSX for creating user interfaces using JSX or h function calls.",
   "main": "picojsx.js",
   "module": "picojsx.js",
