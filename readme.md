@@ -3,7 +3,7 @@
 
 PicoJSX is a lightweight frontend library with a minimal virtual DOM implementation, designed for creating user interfaces using JSX or direct calls to the `h` (hyperscript) function. It offers a component model with state, lifecycle methods, an optional global store with `localStorage` persistence, and efficient automatic UI updates through inteligent diffing and patching.
 
-**Version:** 2.0.2
+**Version:** 2.0.3
 
 ## Motivation
 
