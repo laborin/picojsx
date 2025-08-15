@@ -2,7 +2,7 @@
  * @fileoverview PicoJSX: A lightweight frontend library with virtual DOM
  * for creating user interfaces using JSX or `h` function calls.
  * Features component state, lifecycle methods, global store, and efficient updates.
- * @version 2.0.1
+ * @version 2.0.2
  */
 
 /**
@@ -46,6 +46,12 @@ const PicoJSX = (() => {
 		const key = props?.key || null;
 		const restProps = props ? { ...props } : {};
 		if (restProps.key !== undefined) delete restProps.key;
+
+		// For components, add children to props (React compatibility)
+		if (typeof type === 'function' && normalizedChildren.length > 0) {
+			// If there's only one child, pass it directly; otherwise pass array
+			restProps.children = normalizedChildren.length === 1 ? normalizedChildren[0] : normalizedChildren;
+		}
 
 		// Handle functional components immediately
 		if (typeof type === 'function' && !type.isPicoClassComponent) {
@@ -418,7 +424,7 @@ const PicoJSX = (() => {
 			const instance = oldVNode._instance;
 			newVNode._instance = instance;
 			
-			// Update props
+			// Update props (including children)
 			const prevProps = instance.props;
 			const prevState = instance.state;
 			instance.props = newVNode.props;
@@ -781,14 +787,108 @@ const PicoJSX = (() => {
 		container._rootDOM = dom;
 	}
 
+	/**
+	 * Simple client-side router for single-page applications.
+	 * Supports static and dynamic routes with parameters.
+	 * @class Router
+	 */
+	class Router {
+		constructor() {
+			this.routes = {};
+			this.currentRoute = null;
+			this.currentComponent = null;
+			window.addEventListener('popstate', () => this.handleRoute());
+		}
+		
+		/**
+		 * Register a route with a component.
+		 * @param {string} path - Route path (e.g., '/', '/user/:id').
+		 * @param {Function} component - Component to render for this route.
+		 * @returns {Router} This router instance for chaining.
+		 */
+		route(path, component) {
+			this.routes[path] = component;
+			return this;
+		}
+		
+		/**
+		 * Navigate to a new route.
+		 * @param {string} path - Path to navigate to.
+		 * @param {boolean} [replaceState=false] - Whether to replace history state instead of pushing.
+		 */
+		navigate(path, replaceState = false) {
+			if (replaceState) {
+				history.replaceState({}, '', path);
+			} else {
+				history.pushState({}, '', path);
+			}
+			this.handleRoute();
+		}
+		
+		/**
+		 * Handle current route and trigger route change callback.
+		 */
+		handleRoute() {
+			const path = window.location.pathname;
+			const route = this.matchRoute(path);
+			
+			if (route) {
+				this.currentRoute = route;
+				if (this.onRouteChange) {
+					this.onRouteChange(route.component, route.params);
+				}
+			} else {
+				this.navigate('/'); // Redirect to home on unknown route
+			}
+		}
+		
+		/**
+		 * Match a path against registered routes.
+		 * @param {string} path - Path to match.
+		 * @returns {object|null} Matched route with component and params, or null.
+		 */
+		matchRoute(path) {
+			// Exact match first
+			if (this.routes[path]) {
+				return { component: this.routes[path], params: {} };
+			}
+			
+			// Dynamic route matching (e.g., /chat/:id)
+			for (const [routePath, component] of Object.entries(this.routes)) {
+				const regex = new RegExp('^' + routePath.replace(/:[^/]+/g, '([^/]+)') + '$');
+				const match = path.match(regex);
+				
+				if (match) {
+					const params = {};
+					const keys = routePath.match(/:[^/]+/g) || [];
+					keys.forEach((key, index) => {
+						params[key.slice(1)] = match[index + 1];
+					});
+					return { component, params };
+				}
+			}
+			
+			return null;
+		}
+		
+		/**
+		 * Set a handler to be called when route changes.
+		 * @param {Function} handler - Function to call with (component, params) when route changes.
+		 */
+		setRouteChangeHandler(handler) {
+			this.onRouteChange = handler;
+		}
+	}
+
 	return {
 		h,
 		Fragment,
 		render,
 		Component,
 		createStore,
+		Router,
 	};
 })();
 
 export default PicoJSX;
-export const { h, Fragment, render, Component, createStore } = PicoJSX;
+export const { h, Fragment, render, Component, createStore, Router } = PicoJSX;

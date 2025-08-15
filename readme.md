@@ -3,7 +3,7 @@
 
 PicoJSX is a lightweight frontend library with a minimal virtual DOM implementation, designed for creating user interfaces using JSX or direct calls to the `h` (hyperscript) function. It offers a component model with state, lifecycle methods, an optional global store with `localStorage` persistence, and efficient automatic UI updates through inteligent diffing and patching.
 
-**Version:** 2.0.1
+**Version:** 2.0.2
 
 ## Motivation
 
@@ -28,6 +28,7 @@ PicoJSX was made as an experiment, a way to learn and understand modern framewor
 *   **Automatic Updates:** `setState` always trigger efficient reconciliation and patching.
 *   **Natural Focus Preservation:** Focus and cursor position are naturally preserved since elements are patched, not replaced.
 *   **`dangerouslySetInnerHTML`:** An object with a `__html` key (e.g., `{ __html: '<span>Hello</span>' }`) allows you to set raw HTML content inside an element. Use with caution as it can expose your users to cross-site scripting (XSS) attacks if the HTML source is not sanitized.
+*   **Built-in Router:** Simple client-side router for single-page applications with support for dynamic routes and parameters.
 
 ## Installation / Usage
 
@@ -44,7 +45,7 @@ PicoJSX was made as an experiment, a way to learn and understand modern framewor
     // You can import the full PicoJSX object
     import PicoJSX from '@laborin/picojsx';
     // Or import specific parts you need (recommended)
-    import { h, Fragment, render, Component, createStore } from '@laborin/picojsx';
+    import { h, Fragment, render, Component, createStore, Router } from '@laborin/picojsx';
     ```
     (See "Main API" section below for more on imports).
 
@@ -122,11 +123,12 @@ The library exposes these key parts. When using npm and ES modules, you'll typic
 *   `render`: Function to render components into the DOM.
 *   `Component`: Base class for stateful components.
 *   `createStore`: Function to create a global store.
+*   `Router`: Class for client-side routing in single-page applications.
 
 If using ES6 modules (recommended way after `npm install`):
 ```javascript
 // Recommended: Use named imports for clarity, especially for h and Fragment with JSX
-import { h, Fragment, render, Component, createStore } from '@laborin/picojsx';
+import { h, Fragment, render, Component, createStore, Router } from '@laborin/picojsx';
 
 // Alternatively, you can import the default object that contains all exports
 import PicoJSX from '@laborin/picojsx';
@@ -504,6 +506,183 @@ const userStore = createStore(
 // // If you refresh the page, the username should still be Alice!
 // console.log(userStore.getState().username); // 'Alice' (after setting or page load)
 ```
+
+---
+
+## 6. `Router`
+
+A simple client-side router for building single-page applications. It support static routes and dynamic routes with parameters (like `/user/:id`).
+
+### Creating a Router
+
+```javascript
+import { Router } from '@laborin/picojsx';
+
+const router = new Router();
+```
+
+### Registering Routes
+
+Use the `route()` method to register paths with their components:
+
+```javascript
+router
+  .route('/', HomePage)
+  .route('/about', AboutPage)
+  .route('/user/:id', UserPage)  // Dynamic route with parameter
+  .route('/blog/:category/:slug', BlogPostPage); // Multiple parameters
+```
+
+### Navigation
+
+Navigate programatically using the `navigate()` method:
+
+```javascript
+// Regular navigation (adds to browser history)
+router.navigate('/about');
+
+// Replace current history entry instead of adding new one
+router.navigate('/login', true);
+```
+
+### Handling Route Changes
+
+Setup a handler to respond when routes change:
+
+```javascript
+router.setRouteChangeHandler((component, params) => {
+  // component: The component class for the matched route
+  // params: Object with route parameters (eg. { id: '123' } for /user/:id)
+  
+  // Example: Render the component
+  render(h(component, { params, router }), document.getElementById('app'));
+});
+
+// Initialize by handling current route
+router.handleRoute();
+```
+
+### Complete Router Example
+
+```javascript
+/** @jsx h */
+import { h, Component, render, Router } from '@laborin/picojsx';
+
+// Define your pages components
+class HomePage extends Component {
+  render() {
+    return (
+      <div>
+        <h1>Welcome Home!</h1>
+        <button onClick={() => this.props.router.navigate('/about')}>
+          Go to About
+        </button>
+      </div>
+    );
+  }
+}
+
+class AboutPage extends Component {
+  render() {
+    return (
+      <div>
+        <h1>About Us</h1>
+        <button onClick={() => this.props.router.navigate('/')}>
+          Back to Home
+        </button>
+      </div>
+    );
+  }
+}
+
+class UserPage extends Component {
+  render() {
+    // Access route parameters via props
+    const { id } = this.props.params;
+    return (
+      <div>
+        <h1>User Profile</h1>
+        <p>Viewing user ID: {id}</p>
+      </div>
+    );
+  }
+}
+
+// Main App component that manage routing
+class App extends Component {
+  constructor(props) {
+    super(props);
+    this.router = new Router();
+    this.state = {
+      currentComponent: null,
+      currentParams: {}
+    };
+  }
+
+  componentDidMount() {
+    // Register routes
+    this.router
+      .route('/', HomePage)
+      .route('/about', AboutPage)
+      .route('/user/:id', UserPage);
+
+    // Handle route changes
+    this.router.setRouteChangeHandler((component, params) => {
+      this.setState({
+        currentComponent: component,
+        currentParams: params
+      });
+    });
+
+    // Handle initial route
+    this.router.handleRoute();
+  }
+
+  render() {
+    const { currentComponent: CurrentComponent, currentParams } = this.state;
+    
+    if (!CurrentComponent) {
+      return <div>Loading...</div>;
+    }
+
+    return (
+      <div>
+        <nav>
+          <a href="/" onClick={(e) => {
+            e.preventDefault();
+            this.router.navigate('/');
+          }}>Home</a>
+          {' | '}
+          <a href="/about" onClick={(e) => {
+            e.preventDefault();
+            this.router.navigate('/about');
+          }}>About</a>
+          {' | '}
+          <a href="/user/123" onClick={(e) => {
+            e.preventDefault();
+            this.router.navigate('/user/123');
+          }}>User 123</a>
+        </nav>
+        <hr />
+        <CurrentComponent params={currentParams} router={this.router} />
+      </div>
+    );
+  }
+}
+
+// Initialize the app
+render(<App />, document.getElementById('app'));
+```
+
+### Router API Reference
+
+- **`route(path, component)`**: Register a route. Returns router instance for chaining.
+- **`navigate(path, replaceState = false)`**: Navigate to a path programaticaly.
+- **`handleRoute()`**: Process current browser location and trigger route handler.
+- **`setRouteChangeHandler(handler)`**: Set callback for route changes. Handler receive `(component, params)`.
+- **`matchRoute(path)`**: Manually match a path against registered routes. Returns `{ component, params }` or `null`.
+
+The router automaticaly listens to browser back/forward buttons via the `popstate` event and will handle those navigation events acordingly.
 
 ---
 
