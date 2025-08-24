@@ -2,7 +2,7 @@
  * @fileoverview PicoJSX: A lightweight frontend library with virtual DOM
  * for creating user interfaces using JSX or `h` function calls.
  * Features component state, lifecycle methods, global store, and efficient updates.
- * @version 2.0.3
+ * @version 2.0.4
  */
 
 /**
