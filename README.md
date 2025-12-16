@@ -180,6 +180,59 @@ Or use pragma comments in each file:
 /** @jsxFrag Fragment */
 ```
 
+## TypeScript
+
+The library includes TypeScript declarations out of the box. No need to install separate `@types` package.
+
+**tsconfig.json**
+```json
+{
+  "compilerOptions": {
+    "jsx": "react",
+    "jsxFactory": "h",
+    "jsxFragmentFactory": "Fragment"
+  }
+}
+```
+
+Then add a reference to the JSX shim at the top of your entry file (or any .tsx file):
+
+```typescript
+/// <reference types="@laborin/picojsx/jsx-shim" />
+```
+
+Typed components work as you would expect:
+
+```typescript
+/// <reference types="@laborin/picojsx/jsx-shim" />
+import { h, Component, Fragment, render } from '@laborin/picojsx';
+
+interface CounterProps {
+  initialValue?: number;
+}
+
+interface CounterState {
+  count: number;
+}
+
+class Counter extends Component<CounterProps, CounterState> {
+  constructor(props: CounterProps) {
+    super(props);
+    this.state = { count: props.initialValue || 0 };
+  }
+
+  render() {
+    return (
+      <button onClick={() => this.setState({ count: this.state.count + 1 })}>
+        Count: {this.state.count}
+      </button>
+    );
+  }
+}
+
+render(<Counter initialValue={5} />, document.getElementById('app')!);
+```
+
 ## Main API
 
 - **h(type, props, ...children)** - Create virtual nodes (JSX factory)

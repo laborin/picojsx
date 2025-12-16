@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.5] - 2025-12-16
+### Added
+- TypeScript declarations file (`picojsx.d.ts`) for full TypeScript support
+- JSX shim file (`jsx-shim.d.ts`) for global JSX namespace support
+- Type definitions for all public API: `h`, `Fragment`, `Component`, `render`, `createStore`, `Router`
+- JSX intrinsic elements types for all HTML and SVG elements
+- Generic types for Component props/state and Store
+
 ## [2.0.4] - 2025-08-24
 Dummy version to push readme file
 
